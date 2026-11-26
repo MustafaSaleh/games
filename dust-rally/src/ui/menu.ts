@@ -3,6 +3,7 @@ import { parseSeed, seedToString } from '../core/rng';
 import type { StageDef } from '../world/stage';
 import { fmtTime } from './hud';
 import type { CharacterView, Gesture } from '../render/character';
+import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle } from '../config/cars';
 
 export interface MenuHandlers {
   startStage(def: StageDef): void;
@@ -148,6 +149,8 @@ export class Menu {
             ? this.endlessHtml()
             : s === 'settings'
               ? this.settingsHtml()
+              : s === 'garage'
+                ? this.garageHtml()
               : s === 'pause'
                 ? this.pauseHtml()
                 : s === 'results'
@@ -166,6 +169,7 @@ export class Menu {
         <button class="btn primary" data-act="stages">Stages</button>
         <button class="btn" data-act="endless">Endless</button>
         <button class="btn" data-act="daily">Daily Challenge<small>Seed ${seedToString(this.dailySeed)} · Best ${this.dailyBest ? Math.floor(this.dailyBest) + ' m' : '—'}</small></button>
+        <button class="btn" data-act="garage">Garage<small>${esc(getStyle(settings.carStyle).name)} · ${esc(getLivery(settings.carLivery).name)}</small></button>
         <button class="btn ghost" data-act="settings">Settings</button>
       </div>
       <div class="hint">${'ontouchstart' in window ? 'Left thumb steers · right side: gas / brake / drift' : 'WASD / arrows · Space = handbrake · R = reset · Esc = pause · gamepad supported'}</div>`;
@@ -242,6 +246,28 @@ export class Menu {
       <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
   }
 
+  private garageHtml(): string {
+    const st = getStyle(settings.carStyle);
+    const lv = getLivery(settings.carLivery);
+    const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
+    const styles = CAR_STYLES.map(
+      (c) => `<button class="chip ${c.id === st.id ? 'on' : ''}" data-act="car-style" data-id="${c.id}">${esc(c.name)}</button>`,
+    ).join('');
+    const swatches = CAR_LIVERIES.map(
+      (l) =>
+        `<button class="swatch ${l.id === lv.id ? 'on' : ''}" data-act="car-livery" data-id="${l.id}" title="${esc(l.name)}" aria-label="${esc(l.name)}"
+          style="background:linear-gradient(135deg, ${hex(l.body)} 0 62%, ${hex(l.stripe)} 62% 78%, ${hex(l.body)} 78%)"></button>`,
+    ).join('');
+    return `<h2>Garage</h2>
+      <div class="set-group">Car</div>
+      <div class="chips">${styles}</div>
+      <p class="muted small">${esc(st.description)}</p>
+      <div class="set-group">Colour · <span class="livery-name">${esc(lv.name)}</span></div>
+      <div class="swatches">${swatches}</div>
+      <p class="muted small">Cosmetic only — every car handles the same.</p>
+      <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
+  }
+
   private pauseHtml(): string {
     return `<h2>Paused</h2><div class="btn-col">
       <button class="btn primary" data-act="resume">Resume</button>
@@ -272,7 +298,14 @@ export class Menu {
       case 'stages':
       case 'endless':
       case 'settings':
+      case 'garage':
         this.show(act, true);
+        break;
+      case 'car-style':
+      case 'car-livery':
+        updateSettings(act === 'car-style' ? { carStyle: t.dataset.id! } : { carLivery: t.dataset.id! });
+        this.h.settingsChanged(settings);
+        this.render();
         break;
       case 'daily':
         this.h.startDaily();

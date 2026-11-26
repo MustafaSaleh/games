@@ -7,7 +7,8 @@ import { Car } from '../physics/car';
 import { FollowCamera } from '../render/camera';
 import { BlobShadow, Headlights, Particles, TireMarks } from '../render/effects';
 import { GateView } from '../render/gates';
-import { buildCar, type CarModel } from '../render/models';
+import { buildCar, disposeCar, type CarModel } from '../render/models';
+import { GHOST_LIVERY, getLivery, getStyle } from '../config/cars';
 import { Renderer3D } from '../render/renderer';
 import { Hud, fmtDelta, fmtTime } from '../ui/hud';
 import { Menu, type StageInfo } from '../ui/menu';
@@ -28,7 +29,6 @@ import { dailySeed, randomSeed, seedToString, todayKey } from './rng';
 import { autoQuality, isTouchDevice, onSettingsChange, settings } from './settings';
 import { load, save } from './storage';
 
-const CAR_COLOR = 0xf1eee6;
 
 interface Debug {
   autopilot: boolean;
@@ -96,12 +96,11 @@ export class Game {
     this.r3 = new Renderer3D(canvas, QUALITY[this.qualityLevel()]);
     this.marks = new TireMarks(this.r3.quality.tireMarks);
     this.particles = new Particles(this.r3.quality.particles);
-    this.carModel = buildCar(CAR_COLOR);
-    this.ghostModel = buildCar(0x8ac8ff, true);
+    this.carModel = buildCar(getStyle(settings.carStyle).id, getLivery(settings.carLivery));
+    this.ghostModel = buildCar(getStyle(settings.carStyle).id, GHOST_LIVERY, true);
     const sc = this.r3.scene;
     sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group);
     this.ghostModel.root.visible = false;
-    for (const w of this.carModel.wheels) w.rotation.order = 'YXZ';
 
     this.vignette = el('div', 'vignette', uiRoot);
     this.hud = new Hud(uiRoot);
@@ -176,7 +175,25 @@ export class Game {
     if (this.world instanceof StageWorld) this.hud.minimap.setStage(this.world.track);
   }
 
+  private carKey = '';
+  /** Rebuild the player + ghost car when the garage selection changes. */
+  private applyCar(): void {
+    const key = settings.carStyle + '/' + settings.carLivery;
+    if (key === this.carKey) return;
+    const first = this.carKey === '';
+    this.carKey = key;
+    if (first) return; // built in the constructor
+    const style = getStyle(settings.carStyle).id;
+    disposeCar(this.carModel);
+    disposeCar(this.ghostModel);
+    this.carModel = buildCar(style, getLivery(settings.carLivery));
+    this.ghostModel = buildCar(style, GHOST_LIVERY, true);
+    this.ghostModel.root.visible = false;
+    this.r3.scene.add(this.carModel.root, this.ghostModel.root);
+  }
+
   private applySettings(): void {
+    this.applyCar();
     this.audio.applyVolume();
     this.touch.applyMode();
     this.hud.cls('fps', 'on', settings.showFps);
@@ -430,7 +447,7 @@ export class Game {
     const diff = wrapAngle(desired - car.heading);
     const j = tr.clampIdx(base + ahead + 20);
     const bend = Math.abs(wrapAngle(Math.atan2(tr.dx(j), tr.dz(j)) - Math.atan2(tr.dx(i), tr.dz(i))));
-    const limit = this.attract ? 20 : clamp(44 - bend * 40, 14, 44);
+    const limit = this.attract ? (this.menu.visible && this.menu.current === 'garage' ? 6 : 20) : clamp(44 - bend * 40, 14, 44);
     inp.steer = clamp(-diff * 2.6, -1, 1);
     inp.throttle = car.speed < limit ? 1 : 0;
     inp.brake = car.speed > limit + 4 ? 0.7 : 0;
@@ -538,11 +555,11 @@ export class Game {
     body.position.y = car.suspOffset * 0.5;
     body.rotation.set(-car.pitch, 0, -car.roll);
     const wheels = this.carModel.wheels;
-    const spin = (car.forwardSpeed * dt) / 0.36 + (car.wheelspin > 0.3 ? 0.4 : 0);
+    const spin = (car.forwardSpeed * dt) / this.carModel.wheelRadius + (car.wheelspin > 0.3 ? 0.4 : 0);
     for (let i = 0; i < 4; i++) {
       wheels[i].rotation.x += spin;
       if (i < 2) wheels[i].rotation.y = -car.steerAngle * 1.3;
-      wheels[i].position.y = 0.36 + (car.airborne ? -0.12 : -car.suspOffset * 0.2);
+      wheels[i].position.y = this.carModel.wheelRadius + (car.airborne ? -0.12 : -car.suspOffset * 0.2);
     }
 
     // ghost
@@ -564,6 +581,9 @@ export class Game {
     this.perf.genMs = performance.now() - tg;
 
     // camera
+    const garage = this.attract && this.menu.visible && this.menu.current === 'garage';
+    this.cam.zoomTarget = garage ? 0.32 : 1;
+    this.cam.shiftTarget = garage ? 1 : 0;
     this.cam.update(Math.min(dt, 0.05), ix, iy, iz, car.vx, car.vz, ih, settings.cameraRotate);
     this.props.update(terrain, this.cam.camera);
 

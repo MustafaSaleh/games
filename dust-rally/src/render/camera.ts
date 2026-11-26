@@ -27,6 +27,12 @@ export class FollowCamera {
   private shakeAmt = 0;
   private shakeT = 0;
   private aspect = 1;
+  /** distance multiplier (garage close-up), smoothed toward zoomTarget */
+  zoom = 1;
+  zoomTarget = 1;
+  /** 0..1: push the car toward the top of the screen (garage preview above the panel) */
+  shift = 0;
+  shiftTarget = 0;
   /** current distance camera -> focus point */
   dist = CAMERA.distance;
 
@@ -61,6 +67,9 @@ export class FollowCamera {
       lx *= CAMERA.lookAheadMax / ll;
       lz *= CAMERA.lookAheadMax / ll;
     }
+    this.shift = damp(this.shift, this.shiftTarget, 3, dt);
+    lx *= 1 - this.shift;
+    lz *= 1 - this.shift;
     this.lax = damp(this.lax, lx, CAMERA.lookAheadSmooth, dt);
     this.laz = damp(this.laz, lz, CAMERA.lookAheadSmooth, dt);
     this.tx = damp(this.tx, x + this.lax, CAMERA.follow, dt);
@@ -70,9 +79,12 @@ export class FollowCamera {
     else this.yaw = 0;
 
     const portrait = clamp(0.8 / this.aspect, 1, CAMERA.portraitBoost);
-    const dist = CAMERA.distance * (1 + clamp(speed / 46, 0, 1) * CAMERA.speedZoom) * portrait;
+    this.zoom = damp(this.zoom, this.zoomTarget, 3, dt);
+    const dist = CAMERA.distance * (1 + clamp(speed / 46, 0, 1) * CAMERA.speedZoom) * portrait * this.zoom;
     const pitch = (CAMERA.pitchDeg * Math.PI) / 180;
     this.dist = dist;
+    // screen-up is +z (fixed camera): focusing below the car moves it up the screen
+    const shiftM = this.shift * dist * 0.085 * portrait;
     const horiz = Math.cos(pitch) * dist,
       vert = Math.sin(pitch) * dist;
     let sx = 0,
@@ -84,8 +96,10 @@ export class FollowCamera {
       this.shakeAmt *= Math.exp(-6 * dt);
     }
     const c = this.camera;
-    c.position.set(this.tx - Math.sin(this.yaw) * horiz + sx, this.ty + vert, this.tz - Math.cos(this.yaw) * horiz + sz);
-    c.lookAt(this.tx + sx, this.ty, this.tz + sz);
+    const fx = this.tx - Math.sin(this.yaw) * shiftM,
+      fz = this.tz - Math.cos(this.yaw) * shiftM;
+    c.position.set(fx - Math.sin(this.yaw) * horiz + sx, this.ty + vert, fz - Math.cos(this.yaw) * horiz + sz);
+    c.lookAt(fx + sx, this.ty, fz + sz);
     c.updateMatrixWorld();
   }
 }
