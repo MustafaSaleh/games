@@ -2,6 +2,7 @@ import { settings, updateSettings, type Settings } from '../core/settings';
 import { parseSeed, seedToString } from '../core/rng';
 import type { StageDef } from '../world/stage';
 import { fmtTime } from './hud';
+import type { CharacterView, Gesture } from '../render/character';
 
 export interface MenuHandlers {
   startStage(def: StageDef): void;
@@ -36,6 +37,13 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 /** All full-screen menus. Plain DOM + event delegation via data-act. */
 export class Menu {
   readonly root: HTMLDivElement;
+  /** Mody, the driver character (main menu + results) */
+  private hero: HTMLDivElement;
+  private body: HTMLDivElement;
+  private bubble: HTMLDivElement;
+  private character: CharacterView | null = null;
+  private heroIntroDone = false;
+  private bubbleTimer = 0;
   private stack: string[] = [];
   stages: StageInfo[] = [];
   endlessBest = { score: 0, seed: 0 };
@@ -51,6 +59,20 @@ export class Menu {
     this.root = document.createElement('div');
     this.root.className = 'menu';
     parent.appendChild(this.root);
+    this.hero = document.createElement('div');
+    this.hero.className = 'hero';
+    this.hero.innerHTML = `<div class="hero-bubble"></div><div class="hero-tag"><b>MODY</b><span>#08</span></div>`;
+    this.bubble = this.hero.querySelector('.hero-bubble')!;
+    this.body = document.createElement('div');
+    this.body.className = 'menu-body';
+    this.root.append(this.hero, this.body);
+    this.hero.addEventListener('click', () => this.character?.play(Math.random() < 0.6 ? 'wave' : 'cheer'));
+    // load three's GLTF bits + the model lazily so the menu appears instantly
+    void import('../render/character').then(({ CharacterView }) => {
+      this.character = new CharacterView(this.hero);
+      this.character.onArrive = () => this.say("Hi! I'm Mody 👋");
+      this.syncHero();
+    });
     this.root.addEventListener('click', (e) => this.onClick(e));
     this.root.addEventListener('change', (e) => this.onChange(e));
     this.root.addEventListener('input', (e) => this.onChange(e));
@@ -60,13 +82,44 @@ export class Menu {
   show(screen: string, push = false): void {
     if (push && this.stack[this.stack.length - 1] !== screen) this.stack.push(screen);
     else this.stack = [screen];
-    this.render();
     this.root.style.display = '';
+    this.render();
   }
 
   hide(): void {
     this.root.style.display = 'none';
-    this.root.innerHTML = '';
+    this.body.innerHTML = '';
+    this.syncHero();
+  }
+
+  /** Show a short speech bubble above Mody. */
+  say(text: string, ms = 2600): void {
+    this.bubble.textContent = text;
+    this.bubble.classList.add('on');
+    clearTimeout(this.bubbleTimer);
+    this.bubbleTimer = window.setTimeout(() => this.bubble.classList.remove('on'), ms);
+  }
+
+  private heroScreen(): boolean {
+    return this.visible && (this.current === 'main' || this.current === 'results');
+  }
+
+  private syncHero(): void {
+    const on = this.heroScreen();
+    this.root.classList.toggle('with-hero', on);
+    const c = this.character;
+    if (!on) this.bubble.classList.remove('on');
+    if (!c) return;
+    c.setActive(on);
+    if (!on) return;
+    if (!this.heroIntroDone) {
+      this.heroIntroDone = true;
+      c.playIntro();
+    } else if (this.current === 'results' && this.result) {
+      const g: Gesture = this.result.record ? 'cheer' : 'wave';
+      c.play(g);
+      this.say(this.result.record ? 'New record! 🏆' : this.result.canNext ? 'Nice drive! 🏁' : "Let's go again! 💪");
+    }
   }
 
   get visible(): boolean {
@@ -100,8 +153,9 @@ export class Menu {
                 : s === 'results'
                   ? this.resultsHtml()
                   : '';
-    this.root.innerHTML = `<div class="panel panel-${s}">${html}</div>`;
+    this.body.innerHTML = `<div class="panel panel-${s}">${html}</div>`;
     if (s === 'main' || s === 'pause') this.returnTo = s;
+    this.syncHero();
   }
 
   private mainHtml(): string {
