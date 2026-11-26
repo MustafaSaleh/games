@@ -171,6 +171,10 @@ export class Game {
       } else {
         this.audio.resume();
         this.loop.start();
+        if (this.session) {
+          this.wakeLock = null; // released automatically while hidden
+          void this.keepAwake(true);
+        }
       }
     });
     const unlock = () => this.audio.unlock();
@@ -552,8 +556,25 @@ export class Game {
     return new URLSearchParams(location.search).get('net') === 'local' ? Promise.resolve(localDriver()) : peerDriver();
   }
 
+  private wakeLock: { release(): Promise<void> } | null = null;
+  /** keep the screen on while in a room (a sleeping phone can't let friends join) */
+  private async keepAwake(on: boolean): Promise<void> {
+    const nav = navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } };
+    try {
+      if (on && !this.wakeLock && nav.wakeLock && !document.hidden) this.wakeLock = await nav.wakeLock.request('screen');
+      else if (!on && this.wakeLock) {
+        const w = this.wakeLock;
+        this.wakeLock = null;
+        await w.release();
+      }
+    } catch {
+      /* not supported / denied */
+    }
+  }
+
   private bindSession(s: Session): void {
     this.session = s;
+    void this.keepAwake(true);
     s.ev.lobby = () => {
       // guests learn about leavers from the lobby list
       for (const [id, r] of this.remotes)
@@ -582,6 +603,7 @@ export class Game {
     };
     s.ev.closed = (reason) => {
       this.session = null;
+      void this.keepAwake(false);
       this.mp = 'off';
       this.menu.netError = reason;
       this.quit();
@@ -601,17 +623,20 @@ export class Game {
         stageId: ss.stageId,
         shareUrl: url.toString(),
         players: ss.players.map((p) => ({ name: p.name, color: liveryCss(p.livery), me: p.id === ss.myId, host: p.id === HOST_ID })),
+        serverOnline: ss.serverOnline,
       };
     };
   }
 
   private netMessage(e: unknown): string {
     const m = (e as Error)?.message ?? '';
-    if (m === 'not-found') return "Can't find that room. Check the code and try again.";
+    if (m === 'not-found') return "Can't find that room. Check the code, and make sure the host still has the game open. (not-found)";
     if (m === 'full') return 'That room is full (4 racers max).';
     if (m === 'version') return 'Your friend has a different version of the game. Both of you: reload the page.';
-    if (m === 'offline' || m === 'timeout') return "Couldn't reach the room server. Check your internet and try again.";
-    return 'Something went wrong. Try again.';
+    if (m === 'offline') return "Couldn't reach the room server. Check your internet and try again. (offline)";
+    if (m === 'timeout') return "Found the room, but the host's device didn't answer. The host must keep the game open on screen (not switch to another app). Then tap Join again. (timeout)";
+    if (m === 'connect-failed') return "Found the room, but couldn't connect to the host's device. The network may block direct connections; try another Wi-Fi or mobile data. (connect-failed)";
+    return `Something went wrong. Try again. (${m || 'unknown'})`;
   }
 
   private async createRoom(name: string): Promise<void> {
@@ -639,7 +664,24 @@ export class Game {
     this.menu.netError = '';
     this.menu.refresh();
     try {
-      const s = await Session.join(await this.driver(), normCode(code), name, settings.carStyle, settings.carLivery);
+      // The host's phone may be busy in another app (sharing the link) for a little while:
+      // keep knocking for up to a minute instead of giving up after one try.
+      const driver = await this.driver();
+      const until = performance.now() + 60000;
+      let s: Session | null = null;
+      for (let attempt = 1; !s; attempt++) {
+        try {
+          s = await Session.join(driver, normCode(code), name, settings.carStyle, settings.carLivery);
+        } catch (e) {
+          const m = (e as Error).message;
+          const retry = m === 'timeout' || m === 'closed' || (m === 'not-found' && attempt < 4);
+          if (!retry || performance.now() > until || this.menu.current !== 'online') throw e;
+          this.menu.netBusy =
+            m === 'not-found' ? `Looking for room ${normCode(code)}…` : "Waiting for the host's device to answer… (the host should keep the game open on screen)";
+          this.menu.refresh();
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
       this.bindSession(s);
       this.mp = 'online';
       this.menu.netBusy = '';
@@ -655,6 +697,7 @@ export class Game {
   private leaveRoom(): void {
     const s = this.session;
     this.session = null;
+    void this.keepAwake(false);
     s?.leave();
     this.mp = 'off';
     this.quit();

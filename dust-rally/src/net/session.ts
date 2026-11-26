@@ -70,6 +70,8 @@ export class Session {
   stageId = '';
   racing = false;
   myId = HOST_ID;
+  /** host: registered with the room server (new friends can join) */
+  serverOnline = true;
   private links = new Map<string, Link>(); // host: guests
   private hostLink: Link | null = null; // guest: host
   private hostT: HostTransport | null = null;
@@ -101,6 +103,10 @@ export class Session {
         s.players = [{ id: HOST_ID, name: cleanName(name), style, livery, slot: 0 }];
         t.onConnection = (link) => s.onGuest(link);
         t.onError = (msg) => s.close(msg);
+        t.onOnline = (on) => {
+          s.serverOnline = on;
+          s.ev.lobby();
+        };
         return s;
       } catch (e) {
         lastErr = e as Error;
