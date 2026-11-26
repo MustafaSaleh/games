@@ -16,6 +16,22 @@ export const CAMERA = {
   portraitBoost: 1.55, // max extra distance in portrait
 };
 
+/** Third-person chase camera tuning. */
+export const CHASE = {
+  fov: 62,
+  distance: 7.2, // m behind the car
+  speedPull: 2.6, // extra distance at top speed
+  height: 2.9, // m above the car
+  lookAhead: 7, // look at a point this far ahead of the car
+  lookHeight: 1.1,
+  yawSmooth: 5.5, // how quickly the camera swings behind the car (1/s)
+  velocityBlend: 0.35, // 0 = follow the nose, 1 = follow the direction of travel (drifts)
+  heightSmooth: 6,
+  minClearance: 1.3, // keep at least this far above the ground
+};
+
+export type CameraMode = 'top' | 'chase';
+
 export class FollowCamera {
   readonly camera: THREE.PerspectiveCamera;
   private tx = 0;
@@ -35,6 +51,11 @@ export class FollowCamera {
   shiftTarget = 0;
   /** current distance camera -> focus point */
   dist = CAMERA.distance;
+  /** 'top' = high top-down view (default), 'chase' = third person behind the car */
+  mode: CameraMode = 'top';
+  private appliedMode: CameraMode | '' = '';
+  /** terrain height, so the chase camera never dips into a hill */
+  ground: ((x: number, z: number) => number) | null = null;
 
   constructor() {
     this.camera = new THREE.PerspectiveCamera(CAMERA.fov, 1, 5, 600);
@@ -60,6 +81,20 @@ export class FollowCamera {
 
   update(dt: number, x: number, y: number, z: number, vx: number, vz: number, heading: number, rotate: boolean): void {
     const speed = Math.hypot(vx, vz);
+    if (this.mode !== this.appliedMode) {
+      const c = this.camera;
+      const chase = this.mode === 'chase';
+      c.fov = chase ? CHASE.fov : CAMERA.fov;
+      c.near = chase ? 0.3 : 5;
+      c.far = chase ? 900 : 600;
+      c.updateProjectionMatrix();
+      if (chase) {
+        this.yaw = heading;
+        this.ty = y;
+      }
+      this.appliedMode = this.mode;
+    }
+    if (this.mode === 'chase') return this.updateChase(dt, x, y, z, vx, vz, heading, speed);
     let lx = vx * CAMERA.lookAhead,
       lz = vz * CAMERA.lookAhead;
     const ll = Math.hypot(lx, lz);
@@ -100,6 +135,36 @@ export class FollowCamera {
       fz = this.tz - Math.cos(this.yaw) * shiftM;
     c.position.set(fx - Math.sin(this.yaw) * horiz + sx, this.ty + vert, fz - Math.cos(this.yaw) * horiz + sz);
     c.lookAt(fx + sx, this.ty, fz + sz);
+    c.updateMatrixWorld();
+  }
+
+  private updateChase(dt: number, x: number, y: number, z: number, vx: number, vz: number, heading: number, speed: number): void {
+    // swing behind the car; while drifting partly follow the direction of travel
+    let target = heading;
+    if (speed > 4) target = lerpAngle(heading, Math.atan2(vx, vz), CHASE.velocityBlend * clamp((speed - 4) / 10, 0, 1));
+    this.yaw = lerpAngle(this.yaw, target, 1 - Math.exp(-CHASE.yawSmooth * dt));
+    this.ty = damp(this.ty, y, CHASE.heightSmooth, dt);
+    this.tx = x;
+    this.tz = z;
+    const dist = CHASE.distance + clamp(speed / 46, 0, 1) * CHASE.speedPull;
+    this.dist = dist;
+    const fx = Math.sin(this.yaw),
+      fz = Math.cos(this.yaw);
+    const px = x - fx * dist,
+      pz = z - fz * dist;
+    let py = this.ty + CHASE.height;
+    if (this.ground) py = Math.max(py, this.ground(px, pz) + CHASE.minClearance);
+    let sx = 0,
+      sy = 0;
+    if (this.shakeAmt > 0.001) {
+      this.shakeT += dt * 40;
+      sx = Math.sin(this.shakeT * 1.3) * this.shakeAmt * 0.25;
+      sy = Math.cos(this.shakeT * 1.7) * this.shakeAmt * 0.2;
+      this.shakeAmt *= Math.exp(-6 * dt);
+    }
+    const c = this.camera;
+    c.position.set(px + sx * fz, py + sy, pz - sx * fx);
+    c.lookAt(x + fx * CHASE.lookAhead, this.ty + CHASE.lookHeight, z + fz * CHASE.lookAhead);
     c.updateMatrixWorld();
   }
 }

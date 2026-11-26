@@ -57,6 +57,10 @@ export const HANDLING = {
   restitution: 0.28,
   collisionFriction: 0.25,
   collisionSpin: 0.08,
+  /** car vs car (multiplayer): bounciness, sideways grip between bodies, spin from off-centre hits */
+  carRestitution: 0.45,
+  carFriction: 0.3,
+  carSpin: 0.09,
 };
 
 export type Handling = typeof HANDLING;

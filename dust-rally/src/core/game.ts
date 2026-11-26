@@ -5,7 +5,8 @@ import { QUALITY } from '../config/quality';
 import { SURFACES } from '../config/surfaces';
 import { Car } from '../physics/car';
 import { FollowCamera } from '../render/camera';
-import { BlobShadow, Headlights, Particles, TireMarks } from '../render/effects';
+import { BlobShadow, Headlights, Particles, Sparks, TireMarks } from '../render/effects';
+import { makeContact, resolveCarCar, type CarBody, type CarContact } from '../physics/collisions';
 import { GateView } from '../render/gates';
 import { buildCar, disposeCar, type CarModel } from '../render/models';
 import { GHOST_LIVERY, getLivery, getStyle } from '../config/cars';
@@ -26,7 +27,7 @@ import { Loop } from './loop';
 import { clamp, lerp, lerpAngle, smoothstep, wrapAngle } from './math';
 import { Race, type Mode } from './race';
 import { dailySeed, randomSeed, seedToString, todayKey } from './rng';
-import { autoQuality, isTouchDevice, onSettingsChange, settings } from './settings';
+import { autoQuality, isTouchDevice, onSettingsChange, settings, updateSettings } from './settings';
 import { load, save } from './storage';
 import { LocalRacer, RemoteCar, gridSlot, liveryCss, otherLivery } from './racers';
 import { HOST_ID, Session, cleanName, normCode, type MpPlayer } from '../net/session';
@@ -86,6 +87,9 @@ export class Game {
   private mpDeadline = 0;
   private mpShown = false;
   private rbuf = [0, 0, 0, 0, 0, 0];
+  private sparks = new Sparks();
+  private contact: CarContact = makeContact();
+  private remoteBody: CarBody = { x: 0, y: 0, z: 0, vx: 0, vz: 0, heading: 0, yawRate: 0 };
   private dots: MapDot[] = [];
   private mix: BiomeMix = { a: null!, b: null!, t: 0 };
   private fog: RGB = [0.5, 0.5, 0.5];
@@ -118,7 +122,7 @@ export class Game {
     this.carModel = buildCar(getStyle(settings.carStyle).id, getLivery(settings.carLivery));
     this.ghostModel = buildCar(getStyle(settings.carStyle).id, GHOST_LIVERY, true);
     const sc = this.r3.scene;
-    sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group);
+    sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group, this.sparks.group);
     this.ghostModel.root.visible = false;
 
     this.vignette = el('div', 'vignette', uiRoot);
@@ -148,6 +152,7 @@ export class Game {
     });
     this.hud.onPause = () => this.pause();
     this.hud.onReset = () => this.resetCar();
+    this.hud.onCamera = () => this.toggleCamera();
     this.hud.show(false);
     this.touch.show(false);
 
@@ -328,6 +333,7 @@ export class Game {
       for (const pl of online) if (pl.id !== this.session?.myId) this.remotes.set(pl.id, new RemoteCar(pl, this.r3.scene, this.labelLayer));
     this.marks.clear();
     this.particles.clear();
+    this.sparks.clear();
 
     const gates = world instanceof StageWorld || world instanceof EndlessWorld ? world.gates : [];
     this.best = def ? loadStageBest(def.id) : null;
@@ -450,12 +456,51 @@ export class Game {
     if (p2.ev.impact > 2.5) {
       p2.cam.shake(p2.ev.impact * 0.06);
       this.burst(p2.car, p2.car.x, p2.car.y + 0.6, p2.car.z, 8, 0.5);
+      if (p2.ev.impact > 5) this.obstacleSparks(p2.car, p2.ev.impact);
     }
     if (p2.ev.landing > 2.5) {
       if (p2.ev.landing > HANDLING.landingHardImpact) p2.cam.shake(p2.ev.landing * 0.05);
       this.burst(p2.car, p2.car.x, p2.car.y + 0.2, p2.car.z, Math.min(24, p2.ev.landing * 2), 1);
     }
     this.emitFx(p2.car, dt, p2.input.handbrake && running);
+  }
+
+  /* ---- car contact: physics already applied, now sparks / sound / shake ---- */
+  private carContact(c: CarContact, other: Car | null): void {
+    if (c.impact > 1.2) {
+      // big hit: shower of sparks thrown sideways, plus the usual impact sound / shake / dust
+      const side = Math.random() < 0.5 ? -1 : 1;
+      this.sparks.emit(c.x, c.y, c.z, Math.min(55, 8 + c.impact * 2.6), 4 + c.impact * 0.35, -c.nz * side * 0.6, c.nx * side * 0.6);
+      this.car.impact = Math.max(this.car.impact, c.impact * 1.2);
+      if (other) other.impact = Math.max(other.impact, c.impact * 1.2);
+    }
+    if (c.scrape > 3) {
+      // grinding along each other: a steady trickle
+      const n = c.scrape > 9 ? 3 : c.scrape > 6 ? 2 : 1;
+      this.sparks.emit(c.x, c.y, c.z, n, 2.5 + c.scrape * 0.25);
+    }
+  }
+
+  private obstacleSparks(car: Car, impact: number): void {
+    const fx = Math.sin(car.heading),
+      fz = Math.cos(car.heading);
+    const k = car.forwardSpeed >= 0 ? 1.7 : -1.7;
+    this.sparks.emit(car.x + fx * k, car.y + 0.5, car.z + fz * k, Math.min(30, impact * 2), 3 + impact * 0.3);
+  }
+
+  /** online: bump into the other players' cars (they are moved by their own devices) */
+  private collideRemotes(): void {
+    const now = performance.now();
+    const b = this.remoteBody;
+    for (const r of this.remotes.values()) {
+      if (r.gone || r.finishTime != null || !r.body(now, b)) continue;
+      if (resolveCarCar(this.car, b, false, this.contact)) this.carContact(this.contact, null);
+    }
+  }
+
+  /** switch between the top-down and the third-person chase camera */
+  private toggleCamera(): void {
+    updateSettings({ cameraView: settings.cameraView === 'chase' ? 'top' : 'chase' });
   }
 
   private stepOnline(dt: number): void {
@@ -728,6 +773,7 @@ export class Game {
     if (!this.attract && !this.menu.visible) {
       if (inp.pressed('Escape') || inp.pressed('KeyP') || inp.padPressed(9)) this.pause();
       if (inp.pressed('KeyR') || inp.padPressed(3)) this.resetCar();
+      if (inp.pressed('KeyC') || inp.padPressed(8)) this.toggleCamera();
       if (p2 && (p2.input.pressed('Enter') || p2.input.pressed('NumpadEnter') || p2.input.padPressed(3))) this.resetP2();
       if (p2 && p2.input.padPressed(9)) this.pause();
     }
@@ -745,8 +791,14 @@ export class Game {
     if (running && this.mode === 'stage' && !this.attract)
       this.ghostRec.record(dt, this.car.x, this.car.y, this.car.z, this.car.heading, this.car.upX, this.car.upZ);
     this.emitFx(this.car, dt, inp.handbrake && running);
-    if (p2) this.stepP2(p2, dt, terrain);
-    if (online) this.stepOnline(dt);
+    if (p2) {
+      this.stepP2(p2, dt, terrain);
+      if (resolveCarCar(this.car, p2.car, true, this.contact)) this.carContact(this.contact, p2.car);
+    }
+    if (online) {
+      this.stepOnline(dt);
+      this.collideRemotes();
+    }
     if (this.mp !== 'off' && !this.attract) this.checkMpEnd();
     this.perf.stepMs = performance.now() - t0;
   }
@@ -771,6 +823,7 @@ export class Game {
       this.cam.shake(this.ev.impact * 0.06);
       if (this.ev.impact > 6) buzz(Math.min(80, 20 + this.ev.impact * 3));
       this.burst(this.car, this.car.x, this.car.y + 0.6, this.car.z, 8, 0.5);
+      if (this.ev.impact > 5) this.obstacleSparks(this.car, this.ev.impact);
     }
     if (this.ev.landing > 2.5) {
       this.audio.landing(this.ev.landing);
@@ -978,11 +1031,14 @@ export class Game {
 
     // world streaming (split-screen: around both cars)
     world.update(car.x, car.z, Math.max(race.progress.idx, p2 ? p2.race.progress.idx : 0, world.track.start));
-    const fx = car.x + car.vx * 1.2,
-      fz = car.z + car.vz * 1.2;
+    // chase camera looks toward the horizon: stream terrain further ahead of the car
+    const chase = settings.cameraView === 'chase' && !this.attract;
+    const ahead = chase ? this.r3.quality.viewRadius * 0.38 : 0;
+    const fx = car.x + car.vx * 1.2 + Math.sin(car.heading) * ahead,
+      fz = car.z + car.vz * 1.2 + Math.cos(car.heading) * ahead;
     const tg = performance.now();
     terrain.extra.length = 0;
-    if (p2) terrain.extra.push([p2.car.x + p2.car.vx * 1.2, p2.car.z + p2.car.vz * 1.2]);
+    if (p2) terrain.extra.push([p2.car.x + p2.car.vx * 1.2 + Math.sin(p2.car.heading) * ahead, p2.car.z + p2.car.vz * 1.2 + Math.cos(p2.car.heading) * ahead]);
     terrain.update(fx, fz, this.r3.quality.genBudgetMs * (p2 ? 1.5 : 1));
     this.perf.genMs = performance.now() - tg;
 
@@ -990,8 +1046,13 @@ export class Game {
     const garage = this.attract && this.menu.visible && this.menu.current === 'garage';
     this.cam.zoomTarget = garage ? 0.32 : 1;
     this.cam.shiftTarget = garage ? 1 : 0;
+    const ground = this.groundFn;
+    this.cam.mode = chase ? 'chase' : 'top';
+    this.cam.ground = ground;
     this.cam.update(Math.min(dt, 0.05), ix, iy, iz, car.vx, car.vz, ih, settings.cameraRotate);
     if (p2) {
+      p2.cam.mode = this.cam.mode;
+      p2.cam.ground = ground;
       const c2 = p2.car;
       p2.cam.update(Math.min(dt, 0.05), lerp(c2.px, c2.x, alpha), lerp(c2.py, c2.y, alpha), lerp(c2.pz, c2.z, alpha), c2.vx, c2.vz, lerpAngle(c2.pHeading, c2.heading, alpha), settings.cameraRotate);
     }
@@ -1001,7 +1062,7 @@ export class Game {
     const m = world.biomeAt(ix, iz, this.mix);
     mixRGB(m.a.pal.fog, m.b.pal.fog, m.t, this.fog);
     const [ta, tb, tt] = this.timeOfDay(race.maxS);
-    this.r3.applyLighting(ta, tb, tt, this.fog, this.cam.dist);
+    this.r3.applyLighting(ta, tb, tt, this.fog, this.cam.dist, chase ? this.r3.quality.viewRadius * 1.2 : Infinity);
     this.vignette.style.opacity = String(this.r3.light.vignette);
 
     // effects
@@ -1014,9 +1075,11 @@ export class Game {
       p2.headlights.update(c2.x, c2.z, c2.y, c2.heading, this.r3.light.headlights, terrain, c2.airborne);
     }
     this.particles.update(dt);
+    this.sparks.update(dt, ground);
     this.r3.renderer.getDrawingBufferSize(this.bufSize);
     const viewH = p2 && window.innerWidth < window.innerHeight ? this.bufSize.y / 2 : this.bufSize.y;
     this.particles.mat.uniforms.uScale.value = viewH / (2 * Math.tan((this.cam.camera.fov * Math.PI) / 360));
+    this.sparks.ptMat.uniforms.uScale.value = this.particles.mat.uniforms.uScale.value;
     this.particles.mat.uniforms.uLight.value = clamp(this.r3.light.level + this.r3.light.headlights * 0.4, 0.15, 1);
     this.marks.flush();
     this.drawGates(dt);
@@ -1063,6 +1126,8 @@ export class Game {
       wheels[i].position.y = model.wheelRadius + (car.airborne ? -0.12 : -car.suspOffset * 0.2);
     }
   }
+
+  private groundFn = (x: number, z: number): number => this.terrain?.heightAt(x, z) ?? 0;
 
   private rbufY(r: RemoteCar): number {
     return r.model.root.position.y;
@@ -1175,7 +1240,7 @@ export class Game {
     if (this.ghostVisible) dots.push({ x: this.ghostPose.x, z: this.ghostPose.z, color: 'rgba(140,200,255,0.8)' });
     if (this.p2) dots.push({ x: this.p2.car.x, z: this.p2.car.z, color: liveryCss(this.p2.livery.id) });
     for (const r of this.remotes.values()) if (r.visible) dots.push({ x: r.x, z: r.z, color: liveryCss(r.player.livery) });
-    hud.minimap.draw(this.world!.track, race.gates, next, car.x, car.z, car.heading, dots, settings.cameraRotate ? this.cam.yaw : 0);
+    hud.minimap.draw(this.world!.track, race.gates, next, car.x, car.z, car.heading, dots, settings.cameraRotate || this.cam.mode === 'chase' ? this.cam.yaw : 0);
     if (this.mp !== 'off') this.updateMpHud();
   }
 }

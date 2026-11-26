@@ -37,7 +37,7 @@ The build writes `dist/sw.js` with a precache list of every built file (see `vit
 
 ## Multiplayer
 
-**Multiplayer** in the main menu has two modes. Both race the hand-made stages; first across the line wins. Cars pass through each other like ghosts, so there's no crashing into friends.
+**Multiplayer** in the main menu has two modes. Both race the hand-made stages; first across the line wins. Cars collide: they bounce off each other, get pushed and spun by side hits, and throw sparks (`resolveCarCar` in `physics/collisions.ts`; sparks in `render/effects.ts`). In split-screen both cars are simulated together; online, each device moves only its own car off the other players' (interpolated) cars, so both sides feel the bump.
 
 ### Split-screen (one device)
 
@@ -68,10 +68,12 @@ For development, add `?net=local` to use a BroadcastChannel transport instead of
 
 | | |
 |---|---|
-| Keyboard | WASD / arrows; Space = handbrake; R = reset car onto the road; Esc / P = pause |
-| Gamepad | Left stick steers; RT / A = gas; LT / X = brake/reverse; B / RB = handbrake; Y = reset; Start = pause |
+| Keyboard | WASD / arrows; Space = handbrake; R = reset car onto the road; C = switch camera; Esc / P = pause |
+| Gamepad | Left stick steers; RT / A = gas; LT / X = brake/reverse; B / RB = handbrake; Y = reset; Back = switch camera; Start = pause |
 | Touch | Left thumb: floating joystick (or ◀ ▶ zones). Right side: GAS, BRAKE (hold to reverse), DRIFT (handbrake) |
 | Tilt | Settings → Steering → Tilt. On iOS this asks for motion permission. Calibrated level when a race starts |
+
+**Camera**: the classic high top-down view, or a third-person **chase** view behind the car. Switch with C, the gamepad Back button, the 🎥 button in the race HUD, or Settings → Camera (the choice is saved). In chase view the terrain streams further ahead and the fog is pulled in so the edge of the world stays hidden. Tuning: `CHASE` in `src/render/camera.ts`.
 
 Sound stays muted until your first tap or key press, because browsers block audio autoplay. Haptics use `navigator.vibrate` where it is supported (Android).
 

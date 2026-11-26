@@ -80,6 +80,8 @@ export class RemoteCar {
   x = 0;
   z = 0;
   heading = 0;
+  vx = 0;
+  vz = 0;
   visible = false;
   private v = new THREE.Vector3();
 
@@ -119,6 +121,12 @@ export class RemoteCar {
         break;
       }
     const k = b.at > a.at ? Math.min(1, Math.max(0, (t - a.at) / (b.at - a.at))) : 1;
+    // velocity at this moment, from how far the car moved between the two samples (race time p[0])
+    const dt = b.p[0] - a.p[0];
+    if (dt > 0.01) {
+      this.vx = (b.p[1] - a.p[1]) / dt;
+      this.vz = (b.p[3] - a.p[3]) / dt;
+    } else if (b === s[s.length - 1] && t > b.at + 300) this.vx = this.vz = 0;
     for (let i = 0; i < 6; i++) {
       const j = i + 1;
       if (j === 4) {
@@ -130,6 +138,21 @@ export class RemoteCar {
     this.x = out[0];
     this.z = out[2];
     this.heading = out[3];
+    return true;
+  }
+
+  private tmp = [0, 0, 0, 0, 0, 0];
+  /** collision body at render time (kinematic: velocity measured from the interpolated samples) */
+  body(now: number, out: { x: number; y: number; z: number; vx: number; vz: number; heading: number; yawRate: number }): boolean {
+    if (!this.sample(now, this.tmp)) return false;
+    const b = this.tmp;
+    out.x = b[0];
+    out.y = b[1];
+    out.z = b[2];
+    out.heading = b[3];
+    out.vx = this.vx;
+    out.vz = this.vz;
+    out.yawRate = 0;
     return true;
   }
 

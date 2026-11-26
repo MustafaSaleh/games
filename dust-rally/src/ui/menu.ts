@@ -237,7 +237,7 @@ export class Menu {
         <button class="btn" data-act="garage">Garage<small>${esc(getStyle(settings.carStyle).name)} · ${esc(getLivery(settings.carLivery).name)}</small></button>
         <button class="btn ghost" data-act="settings">Settings</button>
       </div>
-      <div class="hint">${'ontouchstart' in window ? 'Left thumb steers · right side: gas / brake / drift' : 'WASD / arrows · Space = handbrake · R = reset · Esc = pause · gamepad supported'}</div>`;
+      <div class="hint">${'ontouchstart' in window ? 'Left thumb steers · right side: gas / brake / drift' : 'WASD / arrows · Space = handbrake · R = reset · C = camera · Esc = pause · gamepad supported'}</div>`;
   }
 
   private stagesHtml(): string {
@@ -382,7 +382,11 @@ export class Menu {
           ['dusk', 'Dusk'],
           ['night', 'Night'],
         ])}</label>
-        <label>Camera follows rotation ${chk('cameraRotate')}</label>
+        <label>Camera ${sel('cameraView', [
+          ['top', 'Top-down'],
+          ['chase', 'Chase (3rd person)'],
+        ])}</label>
+        <label>Top-down camera follows rotation ${chk('cameraRotate')}</label>
         <label>Show FPS ${chk('showFps')}</label>
         <div class="set-group">Sound</div>
         <label>Sound ${chk('sound')}</label>

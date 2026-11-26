@@ -15,6 +15,8 @@ export interface Settings {
   haptics: boolean;
   timeOfDay: 'auto' | TimeOfDay;
   cameraRotate: boolean;
+  /** race camera: high top-down view or third-person chase view */
+  cameraView: 'top' | 'chase';
   showFps: boolean;
   carStyle: string;
   carLivery: string;
@@ -31,6 +33,7 @@ const DEFAULTS: Settings = {
   haptics: true,
   timeOfDay: 'auto',
   cameraRotate: false,
+  cameraView: 'top',
   showFps: false,
   carStyle: 'hatch',
   carLivery: 'white',
