@@ -88,7 +88,8 @@ export class Renderer3D {
   private cb = new THREE.Color();
 
   /** Blend two lighting presets and apply with the biome fog colour. */
-  applyLighting(a: TimeOfDay, b: TimeOfDay, t: number, biomeFog: RGB, camDist: number): void {
+  /** `farCap`: chase camera looks at the horizon, so fog must hide where streamed terrain ends */
+  applyLighting(a: TimeOfDay, b: TimeOfDay, t: number, biomeFog: RGB, camDist: number, farCap = Infinity): void {
     const A = LIGHTING[a],
       B = LIGHTING[b];
     const mixC = (x: number, y: number, out: THREE.Color) => out.setHex(x).lerp(this.cb.setHex(y), t);
@@ -101,7 +102,8 @@ export class Renderer3D {
     mixC(A.fogTint, B.fogTint, this.ca);
     this.fog.color.setRGB(biomeFog[0] * this.ca.r, biomeFog[1] * this.ca.g, biomeFog[2] * this.ca.b);
     this.fog.near = camDist + lerp(A.fogNear, B.fogNear, t);
-    this.fog.far = camDist + lerp(A.fogFar, B.fogFar, t);
+    this.fog.far = Math.min(camDist + lerp(A.fogFar, B.fogFar, t), farCap);
+    this.fog.near = Math.min(this.fog.near, this.fog.far * 0.4);
     this.scene.background = this.fog.color;
     this.light.headlights = lerp(A.headlights, B.headlights, t);
     this.light.vignette = lerp(A.vignette, B.vignette, t);

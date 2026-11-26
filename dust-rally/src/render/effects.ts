@@ -362,7 +362,7 @@ export class Particles {
       uniforms: { uScale: { value: 400 }, uLight: { value: 1 } },
       vertexShader: `attribute vec4 aCol; attribute float aSize; uniform float uScale; varying vec4 vCol;
         void main(){ vCol = aCol; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
-          gl_PointSize = aSize * uScale / -mv.z; }`,
+          gl_PointSize = min(aSize * uScale / -mv.z, 90.0); }`,
       fragmentShader: `uniform float uLight; varying vec4 vCol;
         void main(){ vec2 p = gl_PointCoord * 2.0 - 1.0; float d = dot(p,p); if (d > 1.0) discard;
           gl_FragColor = vec4(vCol.rgb * uLight, vCol.a * (1.0 - d));
@@ -429,5 +429,151 @@ export class Particles {
     g.attributes.position.needsUpdate = true;
     g.attributes.aCol.needsUpdate = true;
     g.attributes.aSize.needsUpdate = true;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Sparks: additive glowing points + short streaks, with gravity          */
+/* ------------------------------------------------------------------ */
+export class Sparks {
+  readonly group = new THREE.Group();
+  private cap: number;
+  private pos: Float32Array;
+  private vel: Float32Array;
+  private life: Float32Array;
+  private maxLife: Float32Array;
+  private next = 0;
+  private ptPos: Float32Array;
+  private ptCol: Float32Array;
+  private lnPos: Float32Array;
+  private lnCol: Float32Array;
+  private points: THREE.Points;
+  private lines: THREE.LineSegments;
+  readonly ptMat: THREE.ShaderMaterial;
+  alive = 0;
+
+  constructor(cap = 220) {
+    this.cap = cap;
+    this.pos = new Float32Array(cap * 3);
+    this.vel = new Float32Array(cap * 3);
+    this.life = new Float32Array(cap);
+    this.maxLife = new Float32Array(cap);
+    this.ptPos = new Float32Array(cap * 3);
+    this.ptCol = new Float32Array(cap * 3);
+    this.lnPos = new Float32Array(cap * 6);
+    this.lnCol = new Float32Array(cap * 6);
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.BufferAttribute(this.ptPos, 3).setUsage(THREE.DynamicDrawUsage));
+    pg.setAttribute('color', new THREE.BufferAttribute(this.ptCol, 3).setUsage(THREE.DynamicDrawUsage));
+    this.ptMat = new THREE.ShaderMaterial({
+      uniforms: { uScale: { value: 400 } },
+      vertexShader: `attribute vec3 color; uniform float uScale; varying vec3 vCol;
+        void main(){ vCol = color; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+          gl_PointSize = clamp(0.6 * uScale / -mv.z, 2.5, 7.0); }`,
+      fragmentShader: `varying vec3 vCol;
+        void main(){ vec2 p = gl_PointCoord * 2.0 - 1.0; float d = dot(p,p); if (d > 1.0) discard;
+          gl_FragColor = vec4(vCol * (1.0 - d) * 1.6, 1.0); }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.points = new THREE.Points(pg, this.ptMat);
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.BufferAttribute(this.lnPos, 3).setUsage(THREE.DynamicDrawUsage));
+    lg.setAttribute('color', new THREE.BufferAttribute(this.lnCol, 3).setUsage(THREE.DynamicDrawUsage));
+    this.lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    for (const o of [this.points, this.lines]) {
+      o.frustumCulled = false;
+      o.renderOrder = 5;
+      this.group.add(o);
+    }
+  }
+
+  clear(): void {
+    this.life.fill(0);
+    this.alive = 0;
+    this.flush();
+  }
+
+  /** a shower of `count` sparks at (x,y,z), thrown mostly along (dirX,dirZ) and upward */
+  emit(x: number, y: number, z: number, count: number, power: number, dirX = 0, dirZ = 0): void {
+    for (let n = 0; n < count; n++) {
+      const i = this.next;
+      this.next = (this.next + 1) % this.cap;
+      const o = i * 3;
+      this.pos[o] = x + (Math.random() - 0.5) * 0.4;
+      this.pos[o + 1] = y + (Math.random() - 0.5) * 0.3;
+      this.pos[o + 2] = z + (Math.random() - 0.5) * 0.4;
+      const a = Math.random() * Math.PI * 2;
+      const sp = power * (0.35 + Math.random() * 0.9);
+      this.vel[o] = Math.cos(a) * sp * 0.7 + dirX * sp;
+      this.vel[o + 1] = 1.5 + Math.random() * power * 0.6;
+      this.vel[o + 2] = Math.sin(a) * sp * 0.7 + dirZ * sp;
+      this.maxLife[i] = this.life[i] = 0.25 + Math.random() * 0.45;
+    }
+  }
+
+  update(dt: number, groundAt: (x: number, z: number) => number): void {
+    let alive = 0;
+    for (let i = 0; i < this.cap; i++) {
+      if (this.life[i] <= 0) continue;
+      this.life[i] -= dt;
+      const o = i * 3;
+      this.vel[o + 1] -= 16 * dt;
+      this.vel[o] *= 1 - 1.5 * dt;
+      this.vel[o + 2] *= 1 - 1.5 * dt;
+      this.pos[o] += this.vel[o] * dt;
+      this.pos[o + 1] += this.vel[o + 1] * dt;
+      this.pos[o + 2] += this.vel[o + 2] * dt;
+      const g = groundAt(this.pos[o], this.pos[o + 2]) + 0.05;
+      if (this.pos[o + 1] < g) {
+        // bounce off the ground, losing energy
+        this.pos[o + 1] = g;
+        this.vel[o + 1] = Math.abs(this.vel[o + 1]) * 0.35;
+        this.vel[o] *= 0.6;
+        this.vel[o + 2] *= 0.6;
+      }
+      if (this.life[i] > 0) alive++;
+    }
+    this.alive = alive;
+    this.flush();
+  }
+
+  private flush(): void {
+    for (let i = 0; i < this.cap; i++) {
+      const o = i * 3,
+        l = i * 6;
+      const k = this.life[i] > 0 ? this.life[i] / this.maxLife[i] : 0;
+      // white-hot -> yellow -> orange -> dark red as it cools
+      const r = k > 0 ? 1 : 0,
+        g = k > 0 ? 0.25 + 0.75 * k : 0,
+        b = k > 0 ? 0.1 + 0.6 * k * k : 0;
+      const bright = k > 0 ? 0.35 + 0.65 * k : 0;
+      this.ptPos[o] = this.pos[o];
+      this.ptPos[o + 1] = this.pos[o + 1];
+      this.ptPos[o + 2] = this.pos[o + 2];
+      this.ptCol[o] = r * bright;
+      this.ptCol[o + 1] = g * bright;
+      this.ptCol[o + 2] = b * bright;
+      // streak: from the spark back along its velocity
+      const s = 0.05;
+      this.lnPos[l] = this.pos[o];
+      this.lnPos[l + 1] = this.pos[o + 1];
+      this.lnPos[l + 2] = this.pos[o + 2];
+      this.lnPos[l + 3] = this.pos[o] - this.vel[o] * s;
+      this.lnPos[l + 4] = this.pos[o + 1] - this.vel[o + 1] * s;
+      this.lnPos[l + 5] = this.pos[o + 2] - this.vel[o + 2] * s;
+      this.lnCol[l] = r * bright;
+      this.lnCol[l + 1] = g * bright;
+      this.lnCol[l + 2] = b * bright;
+      this.lnCol[l + 3] = r * bright * 0.3;
+      this.lnCol[l + 4] = g * bright * 0.2;
+      this.lnCol[l + 5] = 0;
+    }
+    for (const obj of [this.points, this.lines]) {
+      const geo = obj.geometry;
+      geo.attributes.position.needsUpdate = true;
+      geo.attributes.color.needsUpdate = true;
+    }
   }
 }
