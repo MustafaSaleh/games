@@ -31,6 +31,7 @@ export class Hud {
         <div class="hud-time" data-k="time">0:00.00</div>
         <div class="hud-split" data-k="split"></div>
         <div class="hud-sub" data-k="sub"></div>
+        <div class="hud-ammo" data-k="ammo"></div>
       </div>
       <div class="hud-top-right" data-k="mapHolder"></div>
       <div class="hud-top-center">

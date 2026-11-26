@@ -7,6 +7,8 @@ import { Car } from '../physics/car';
 import { FollowCamera } from '../render/camera';
 import { BlobShadow, Headlights, Particles, Sparks, TireMarks } from '../render/effects';
 import { makeContact, resolveCarCar, type CarBody, type CarContact } from '../physics/collisions';
+import { TOMATO, TomatoSystem, aimThrow, type TomatoHit, type TomatoTarget } from './tomatoes';
+import { splatScreen } from '../ui/splat';
 import { GateView } from '../render/gates';
 import { buildCar, disposeCar, type CarModel } from '../render/models';
 import { GHOST_LIVERY, getLivery, getStyle } from '../config/cars';
@@ -88,6 +90,14 @@ export class Game {
   private mpShown = false;
   private rbuf = [0, 0, 0, 0, 0, 0];
   private sparks = new Sparks();
+  /* ---- tomato fight ---- */
+  private tomatoes = new TomatoSystem();
+  private ammo = 0;
+  private claimedGates = new Set<number>();
+  private tomatoHits: TomatoHit[] = [];
+  private tomatoTargets: TomatoTarget[] = [];
+  private splatLayer: HTMLElement;
+  private toast = { text: '', until: 0 };
   private contact: CarContact = makeContact();
   private remoteBody: CarBody = { x: 0, y: 0, z: 0, vx: 0, vz: 0, heading: 0, yawRate: 0 };
   private dots: MapDot[] = [];
@@ -122,11 +132,12 @@ export class Game {
     this.carModel = buildCar(getStyle(settings.carStyle).id, getLivery(settings.carLivery));
     this.ghostModel = buildCar(getStyle(settings.carStyle).id, GHOST_LIVERY, true);
     const sc = this.r3.scene;
-    sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group, this.sparks.group);
+    sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group, this.sparks.group, this.tomatoes.group);
     this.ghostModel.root.visible = false;
 
     this.vignette = el('div', 'vignette', uiRoot);
     this.labelLayer = el('div', 'name-tags', uiRoot);
+    this.splatLayer = el('div', 'splat-layer', uiRoot);
     this.hud = new Hud(uiRoot);
     for (let i = 0; i < 2; i++) this.splitTags.push(el('div', `split-tag p${i + 1}`, this.hud.root));
     el('div', 'split-divider', this.hud.root);
@@ -334,6 +345,11 @@ export class Game {
     this.marks.clear();
     this.particles.clear();
     this.sparks.clear();
+    this.tomatoes.clear();
+    this.splatLayer.replaceChildren();
+    this.ammo = 0;
+    this.claimedGates.clear();
+    this.toast.until = 0;
 
     const gates = world instanceof StageWorld || world instanceof EndlessWorld ? world.gates : [];
     this.best = def ? loadStageBest(def.id) : null;
@@ -346,6 +362,8 @@ export class Game {
     this.mpShown = false;
     this.poseAcc = 0;
     this.hud.root.classList.toggle('split', !!this.p2);
+    this.hud.root.classList.toggle('mp', this.mp !== 'off' && !attract);
+    this.touch.setTomatoes(this.mp !== 'off' && !attract, 0);
     this.hud.root.classList.toggle('online', this.mp === 'online' && !attract);
     this.resize();
     if (attract) this.race.state = 'running';
@@ -451,7 +469,10 @@ export class Game {
       this.audio.checkpoint(true);
       if (this.p1Finish == null) this.mpDeadline = performance.now() + 30000;
     }
-    if (p2.race.ev.gate) this.audio.checkpoint(true);
+    if (p2.race.ev.gate) {
+      this.audio.checkpoint(true);
+      this.gatePassed(2, p2.race);
+    }
     p2.car.consumeEvents(p2.ev);
     if (p2.ev.impact > 2.5) {
       p2.cam.shake(p2.ev.impact * 0.06);
@@ -495,6 +516,93 @@ export class Game {
     for (const r of this.remotes.values()) {
       if (r.gone || r.finishTime != null || !r.body(now, b)) continue;
       if (resolveCarCar(this.car, b, false, this.contact)) this.carContact(this.contact, null);
+    }
+  }
+
+  /* ---- tomato fight ---- */
+
+  /** player 1 or 2 passed a checkpoint: the first one through earns a tomato */
+  private gatePassed(who: 1 | 2, race: Race): void {
+    const n = race.splits.length;
+    if (race.gates[n - 1]?.finish) return; // nothing to throw after the finish
+    if (this.mp === 'online') this.session?.claimGate(n);
+    else if (!this.claimedGates.has(n)) {
+      this.claimedGates.add(n);
+      this.award(who);
+    }
+  }
+
+  private award(who: 1 | 2): void {
+    const key = who === 1 ? (this.p2 ? 'F' : 'F / 🍅') : '/';
+    if (who === 1) this.ammo = Math.min(TOMATO.maxAmmo, this.ammo + 1);
+    else if (this.p2) this.p2.ammo = Math.min(TOMATO.maxAmmo, this.p2.ammo + 1);
+    this.audio.pickup();
+    this.say(this.p2 ? `P${who} got a 🍅! (${key} to throw)` : `🍅 +1! Throw it back at your chaser (${isTouchDevice() ? 'tap 🍅' : 'F'})`);
+  }
+
+  private say(text: string, ms = 2200): void {
+    this.toast.text = text;
+    this.toast.until = performance.now() + ms;
+  }
+
+  private throwTomato(who: 1 | 2): void {
+    const race = who === 1 ? this.race : this.p2?.race;
+    if (!race || race.state !== 'running') return;
+    const ammo = who === 1 ? this.ammo : (this.p2?.ammo ?? 0);
+    if (ammo <= 0) return;
+    if (who === 1) this.ammo--;
+    else this.p2!.ammo--;
+    const car = who === 1 ? this.car : this.p2!.car;
+    const me = this.tomatoOwner(who);
+    const targets = this.collectTargets().filter((t) => t.id !== me);
+    const p = aimThrow(car, targets);
+    this.tomatoes.spawn(me, p);
+    this.audio.whoosh();
+    if (this.mp === 'online') this.session?.sendThrow(p.map((v) => Math.round(v * 100) / 100));
+  }
+
+  private tomatoOwner(who: 1 | 2): string {
+    return this.mp === 'online' ? (this.session?.myId ?? 'me') : who === 1 ? 'p1' : 'p2';
+  }
+
+  /** every car a tomato can hit, with ids matching tomato owners */
+  private collectTargets(): TomatoTarget[] {
+    const out = this.tomatoTargets;
+    out.length = 0;
+    const c = this.car;
+    out.push({ id: this.tomatoOwner(1), x: c.x, y: c.y, z: c.z, vx: c.vx, vz: c.vz });
+    if (this.p2) {
+      const d = this.p2.car;
+      out.push({ id: 'p2', x: d.x, y: d.y, z: d.z, vx: d.vx, vz: d.vz });
+    }
+    for (const [id, r] of this.remotes) if (!r.gone && r.visible) out.push({ id, x: r.x, y: r.model.root.position.y, z: r.z, vx: r.vx, vz: r.vz });
+    return out;
+  }
+
+  private updateTomatoes(dt: number): void {
+    if (this.mp === 'off' || this.attract) return;
+    const hits = this.tomatoHits;
+    const juice = (x: number, y: number, z: number, n: number) => {
+      const red: RGB = [0.85, 0.08, 0.05];
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2,
+          v = 2 + Math.random() * 4;
+        this.particles.emit(x, y, z, Math.cos(a) * v, 1 + Math.random() * 3, Math.sin(a) * v, red, 0.5 + Math.random() * 0.6, 0.5 + Math.random() * 0.5, 0.9);
+      }
+    };
+    this.tomatoes.update(dt, this.groundFn, this.collectTargets(), (x, y, z) => juice(x, y, z, 10), hits);
+    for (const h of hits) {
+      juice(h.x, h.y, h.z, 18);
+      const local = h.target === this.tomatoOwner(1) ? 1 : h.target === 'p2' ? 2 : 0;
+      this.audio.splat(local !== 0);
+      if (!local) continue; // an online player: their own device shows the splat and tells everyone
+      const w = window.innerWidth,
+        hgt = window.innerHeight;
+      const rect = this.p2 ? Renderer3D.splitRects(w, hgt, 2)[local - 1] : { x: 0, y: 0, w, h: hgt };
+      splatScreen(this.splatLayer, rect);
+      buzz(60);
+      if (this.mp === 'online') this.session?.sendSplat(h.owner);
+      else this.say(`SPLAT! ${h.owner.toUpperCase()} got ${h.target.toUpperCase()}! 🍅`);
     }
   }
 
@@ -631,6 +739,20 @@ export class Game {
       if (this.menu.visible && this.menu.current === 'lobby') this.menu.refresh();
     };
     s.ev.start = (stageId, players) => this.startOnline(stageId, players);
+    const nameOf = (id: string) => s.players.find((p) => p.id === id)?.name ?? 'Someone';
+    s.ev.award = (id) => {
+      if (this.mp !== 'online' || this.attract) return;
+      if (id === s.myId) this.award(1);
+      else this.say(`${nameOf(id)} grabbed a 🍅`, 1500);
+    };
+    s.ev.throw = (id, p) => {
+      if (this.mp === 'online' && !this.attract && this.remotes.has(id)) this.tomatoes.spawn(id, p);
+    };
+    s.ev.splat = (id, by) => {
+      if (this.mp !== 'online' || this.attract) return;
+      if (by === s.myId) this.say(`SPLAT! You hit ${nameOf(id)}! 🍅`);
+      else this.say(`${nameOf(by)} splatted ${nameOf(id)}! 🍅`, 1500);
+    };
     s.ev.pose = (id, p) => this.remotes.get(id)?.push(p);
     s.ev.finish = (id, t) => {
       const r = this.remotes.get(id);
@@ -677,7 +799,7 @@ export class Game {
     const m = (e as Error)?.message ?? '';
     if (m === 'not-found') return "Can't find that room. Check the code, and make sure the host still has the game open. (not-found)";
     if (m === 'full') return 'That room is full (4 racers max).';
-    if (m === 'version') return 'Your friend has a different version of the game. Both of you: reload the page.';
+    if (m === 'version') return 'You and the host have different versions of the game. Both of you: reload the page (twice on iPhone/iPad), then try again. (version)';
     if (m === 'offline') return "Couldn't reach the room server. Check your internet and try again. (offline)";
     if (m === 'timeout') return "Found the room, but the host's device didn't answer. The host must keep the game open on screen (not switch to another app). Then tap Join again. (timeout)";
     if (m === 'connect-failed') return "Found the room, but couldn't connect to the host's device. The network may block direct connections; try another Wi-Fi or mobile data. (connect-failed)";
@@ -774,10 +896,13 @@ export class Game {
       if (inp.pressed('Escape') || inp.pressed('KeyP') || inp.padPressed(9)) this.pause();
       if (inp.pressed('KeyR') || inp.padPressed(3)) this.resetCar();
       if (inp.pressed('KeyC') || inp.padPressed(8)) this.toggleCamera();
+      if (this.mp !== 'off' && (inp.pressed('KeyF') || inp.padPressed(4) || inp.throwReq)) this.throwTomato(1);
+      if (p2 && (p2.input.pressed('Slash') || p2.input.pressed('ControlRight') || p2.input.padPressed(4))) this.throwTomato(2);
       if (p2 && (p2.input.pressed('Enter') || p2.input.pressed('NumpadEnter') || p2.input.padPressed(3))) this.resetP2();
       if (p2 && p2.input.padPressed(9)) this.pause();
     }
     inp.endFrame();
+    inp.throwReq = false;
     p2?.input.endFrame();
     if (this.paused && !online) return;
 
@@ -799,7 +924,10 @@ export class Game {
       this.stepOnline(dt);
       this.collideRemotes();
     }
-    if (this.mp !== 'off' && !this.attract) this.checkMpEnd();
+    if (this.mp !== 'off' && !this.attract) {
+      this.updateTomatoes(dt);
+      this.checkMpEnd();
+    }
     this.perf.stepMs = performance.now() - t0;
   }
 
@@ -811,6 +939,7 @@ export class Game {
     if (e.gate) {
       this.audio.checkpoint(true);
       buzz(20);
+      if (this.mp !== 'off') this.gatePassed(1, race);
     }
     if (e.missed) this.audio.checkpoint(false);
     if (e.finished || e.over) {
@@ -1137,12 +1266,16 @@ export class Game {
   private updateMpHud(): void {
     const race = this.race!;
     const p2 = this.p2;
+    const ammoText = (n: number) => (n > 0 ? '🍅'.repeat(n) : '');
+    this.hud.set('ammo', p2 ? '' : this.ammo > 0 ? `${ammoText(this.ammo)} ${isTouchDevice() ? '' : 'F'}` : '');
+    this.touch.setTomatoes(true, this.ammo);
     if (p2) {
       const lead = race.maxS >= p2.race.maxS ? 0 : 1;
       const tag = (i: number, r: Race, fin: number | null, color: string) => {
         const pos = fin != null ? `FINISHED ${fmtTime(fin)}` : `${(i === lead) === true ? '1st' : '2nd'} · CP ${r.gatesPassed}/${r.gates.length}`;
         const warn = fin == null && r.state === 'running' ? (r.wrongWay ? ' · WRONG WAY' : r.missedWarn > 0 ? ' · MISSED CP' : '') : '';
-        const html = `<i style="background:${color}"></i>P${i + 1} · ${pos}${warn}`;
+        const n = i === 0 ? this.ammo : p2.ammo;
+        const html = `<i style="background:${color}"></i>P${i + 1} · ${pos}${warn}${n > 0 ? ' · ' + ammoText(n) : ''}`;
         if (this.splitTags[i].innerHTML !== html) this.splitTags[i].innerHTML = html;
       };
       tag(0, race, this.p1Finish, liveryCss(settings.carLivery));
@@ -1232,6 +1365,7 @@ export class Game {
     else if (race.missedWarn > 0) msg = 'MISSED CHECKPOINT — GO BACK';
     else if (race.wrongWay) msg = 'WRONG WAY';
     else if (race.offTrackFar) msg = 'OFF ROUTE — press ↺';
+    if (!msg && this.toast.until > performance.now()) msg = this.toast.text;
     hud.set('msg', msg);
     if (settings.showFps) hud.set('fps', `${this.r3.fps.toFixed(0)} fps · dpr ${this.r3.dpr} · ${this.props.instances} props`);
     const next = race.nextGate();

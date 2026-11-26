@@ -18,6 +18,7 @@ export class TouchControls {
   private stickX = 0;
   private stickY = 0;
   private held = { left: false, right: false };
+  private tomato: HTMLDivElement;
 
   constructor(
     parent: HTMLElement,
@@ -33,6 +34,11 @@ export class TouchControls {
     const gas = div('tbtn gas', root, 'GAS');
     const brake = div('tbtn brake', root, 'BRAKE');
     const hb = div('tbtn hb', root, 'DRIFT');
+    this.tomato = div('tbtn tomato', root, '🍅');
+    this.tomato.addEventListener('pointerdown', (e) => {
+      this.input.throwReq = true;
+      e.preventDefault();
+    });
 
     // joystick
     this.stickZone.addEventListener('pointerdown', (e) => {
@@ -120,6 +126,14 @@ export class TouchControls {
     this.btnLeft.style.display = this.btnRight.style.display = m === 'buttons' ? '' : 'none';
     this.root.classList.toggle('tilt', m === 'tilt');
     this.root.classList.toggle('autogas', settings.autoGas);
+  }
+
+  /** multiplayer: show the 🍅 throw button with the current ammo */
+  setTomatoes(mp: boolean, ammo: number): void {
+    this.root.classList.toggle('mp', mp);
+    this.tomato.classList.toggle('empty', ammo <= 0);
+    const t = ammo > 0 ? `🍅${ammo > 1 ? '×' + ammo : ''}` : '🍅';
+    if (this.tomato.textContent !== t) this.tomato.textContent = t;
   }
 
   show(on: boolean): void {

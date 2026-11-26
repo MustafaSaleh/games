@@ -13,6 +13,8 @@ export class Input implements CarInput {
   handbrake = false;
   readonly touch = { steer: 0, gas: 0, brake: 0, handbrake: false, active: false };
   tiltSteer = 0;
+  /** set by the on-screen 🍅 button, consumed by the game */
+  throwReq = false;
   tiltActive = false;
   private tiltZero = 0;
   private tiltRaw = 0;
@@ -26,7 +28,7 @@ export class Input implements CarInput {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       if (!this.keys.has(e.code)) this.edge.add(e.code);
       this.keys.add(e.code);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Slash'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());

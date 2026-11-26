@@ -182,6 +182,19 @@ export class GameAudio {
   beep(high = false): void {
     this.oneShot(high ? 1320 : 660, high ? 1320 : 660, high ? 0.5 : 0.18, 0.18, 'square');
   }
+  /** tomato hit: wet low thud + noise */
+  splat(near = true): void {
+    this.oneShot(240, 50, 0.32, near ? 0.3 : 0.12, 'sine', near ? 0.9 : 0.35);
+  }
+  /** tomato thrown */
+  whoosh(): void {
+    this.oneShot(420, 1100, 0.16, 0.05, 'sine', 0.12);
+  }
+  /** picked up a tomato */
+  pickup(): void {
+    this.oneShot(660, 990, 0.12, 0.14, 'triangle');
+    setTimeout(() => this.oneShot(990, 1480, 0.14, 0.12, 'triangle'), 90);
+  }
   checkpoint(good = true): void {
     this.oneShot(good ? 880 : 520, good ? 1320 : 400, 0.25, 0.15, 'triangle');
   }

@@ -43,6 +43,8 @@ export class LocalRacer {
   race!: Race;
   finishTime: number | null = null;
   readonly ev = { impact: 0, landing: 0 };
+  /** tomatoes to throw (multiplayer fun) */
+  ammo = 0;
 
   constructor(
     readonly name: string,

@@ -953,3 +953,120 @@ kbd {
   line-height: 1.35;
   text-align: center;
 }
+
+/* ---------------- tomato fight ---------------- */
+.splat-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.splat {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+.splat-goo {
+  position: absolute;
+  inset: 0;
+}
+.splat .blob {
+  position: absolute;
+  border-radius: 46% 54% 42% 58% / 55% 45% 58% 42%;
+  background: radial-gradient(circle at 38% 34%, rgba(255, 140, 110, 0.95) 0 8%, #e2231a 22%, #b5140d 62%, rgba(140, 10, 6, 0.92) 100%);
+  box-shadow:
+    0 0 0 3px rgba(190, 20, 12, 0.35),
+    inset -6px -8px 18px rgba(80, 0, 0, 0.35);
+  animation: splat-pop 0.18s ease-out both;
+}
+.splat .drip {
+  position: absolute;
+  border-radius: 0 0 50% 50%;
+  background: linear-gradient(#c91a12, #9e1209);
+  transform-origin: top;
+  animation: splat-drip 1.4s ease-in both;
+}
+.splat .seed {
+  position: absolute;
+  width: 7px;
+  height: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #fff6c8, #f2d77a 70%);
+  opacity: 0.9;
+  animation: splat-pop 0.2s ease-out both;
+}
+.squeegee {
+  position: absolute;
+  top: -4%;
+  bottom: -4%;
+  left: -40px;
+  width: 40px;
+}
+.squeegee .rubber {
+  position: absolute;
+  left: 22px;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #1b1b1f, #3a3a42 60%, #111);
+  box-shadow: 4px 0 10px rgba(0, 0, 0, 0.35);
+}
+.squeegee .handle {
+  position: absolute;
+  left: 0;
+  top: 46%;
+  width: 26px;
+  height: 8%;
+  min-height: 34px;
+  border-radius: 6px;
+  background: linear-gradient(#ffb52e, #ff6a3d);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+@keyframes splat-pop {
+  from {
+    scale: 0.2;
+    opacity: 0;
+  }
+  to {
+    scale: 1;
+    opacity: 1;
+  }
+}
+@keyframes splat-drip {
+  from {
+    scale: 1 0.1;
+  }
+  to {
+    scale: 1 1;
+  }
+}
+
+/* tomato ammo in the HUD */
+.hud-ammo {
+  display: none;
+  margin-top: 4px;
+  font-size: 20px;
+  letter-spacing: 1px;
+}
+.hud.mp .hud-ammo {
+  display: block;
+}
+.hud-ammo .empty {
+  filter: grayscale(1);
+  opacity: 0.3;
+}
+.tbtn.tomato {
+  display: none;
+  width: 66px;
+  height: 66px;
+  right: calc(122px + var(--sar));
+  bottom: calc(100px + var(--sab));
+  font-size: 22px;
+}
+.touch.mp .tbtn.tomato {
+  display: flex;
+}
+.tbtn.tomato.empty {
+  opacity: 0.35;
+}
