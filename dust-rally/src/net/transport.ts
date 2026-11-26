@@ -31,6 +31,38 @@ export interface NetDriver {
 
 const PREFIX = 'dustrally-v1-';
 
+/*
+ * Links and host handles are class instances, not object literals: the production
+ * minifier (Rollup) inlined the empty placeholder callbacks of object literals, so
+ * handlers assigned later by Session were never called (guests' messages arrived as
+ * `undefined`). Class fields are not constant-folded.
+ */
+class CallbackLink implements Link {
+  onData: (data: unknown) => void = () => {};
+  onClose: () => void = () => {};
+  constructor(
+    readonly id: string,
+    private sendFn: (d: unknown) => void,
+    private closeFn: () => void,
+  ) {}
+  send(d: unknown): void {
+    this.sendFn(d);
+  }
+  close(): void {
+    this.closeFn();
+  }
+}
+
+class HostHandle implements HostTransport {
+  onConnection: (link: Link) => void = () => {};
+  onError: (msg: string) => void = () => {};
+  onOnline: (online: boolean) => void = () => {};
+  constructor(private closeFn: () => void) {}
+  close(): void {
+    this.closeFn();
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* PeerJS                                                               */
 /* ------------------------------------------------------------------ */
@@ -39,15 +71,13 @@ export async function peerDriver(): Promise<NetDriver> {
   type DataConnection = import('peerjs').DataConnection;
 
   const wrap = (conn: DataConnection): Link => {
-    const link: Link = {
-      id: conn.peer,
-      send: (d) => {
-        if (conn.open) conn.send(d);
+    const link = new CallbackLink(
+      conn.peer,
+      (d) => {
+        if (conn.open) void conn.send(d);
       },
-      onData: () => {},
-      onClose: () => {},
-      close: () => conn.close(),
-    };
+      () => conn.close(),
+    );
     conn.on('data', (d) => link.onData(d));
     let closed = false;
     const done = () => {
@@ -74,16 +104,11 @@ export async function peerDriver(): Promise<NetDriver> {
         const onVis = () => {
           if (!document.hidden) reconnect();
         };
-        const t: HostTransport = {
-          onConnection: () => {},
-          onError: () => {},
-          onOnline: () => {},
-          close: () => {
-            clearTimeout(timer);
-            document.removeEventListener('visibilitychange', onVis);
-            peer.destroy();
-          },
-        };
+        const t = new HostHandle(() => {
+          clearTimeout(timer);
+          document.removeEventListener('visibilitychange', onVis);
+          peer.destroy();
+        });
         // Lost the signalling server (e.g. the phone switched apps): races in progress keep
         // working peer-to-peer; keep trying to re-register the room so new friends can join.
         const reconnect = () => {
@@ -143,12 +168,17 @@ export async function peerDriver(): Promise<NetDriver> {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
-            const link = wrap(conn);
-            const close = link.close;
-            link.close = () => {
-              close();
-              peer.destroy();
-            };
+            const inner = wrap(conn);
+            const link = new CallbackLink(
+              inner.id,
+              (d) => inner.send(d),
+              () => {
+                inner.close();
+                peer.destroy();
+              },
+            );
+            inner.onData = (d) => link.onData(d);
+            inner.onClose = () => link.onClose();
             resolve(link);
           });
         });
@@ -194,15 +224,10 @@ export function localDriver(): NetDriver {
         throw new Error('taken');
       }
       const links = new Map<string, Link>();
-      const t: HostTransport = {
-        onConnection: () => {},
-        onError: () => {},
-        onOnline: () => {},
-        close: () => {
-          for (const l of links.values()) l.close();
-          ch.close();
-        },
-      };
+      const t = new HostHandle(() => {
+        for (const l of links.values()) l.close();
+        ch.close();
+      });
       ch.onmessage = (e: MessageEvent<LocalMsg>) => {
         const m = e.data;
         if (m.t === 'ping') {
@@ -211,16 +236,14 @@ export function localDriver(): NetDriver {
             return;
           }
           const id = m.from;
-          const link: Link = {
+          const link = new CallbackLink(
             id,
-            send: (d) => ch.postMessage({ t: 'data', from: HOST, to: id, d }),
-            onData: () => {},
-            onClose: () => {},
-            close: () => {
+            (d) => ch.postMessage({ t: 'data', from: HOST, to: id, d }),
+            () => {
               if (!links.delete(id)) return;
               ch.postMessage({ t: 'close', from: HOST, to: id });
             },
-          };
+          );
           links.set(id, link);
           t.onConnection(link); // attach handlers before the guest can send anything
           ch.postMessage({ t: 'accept', to: id });
@@ -240,18 +263,18 @@ export function localDriver(): NetDriver {
         const ch = new BroadcastChannel('dustrally-' + code);
         const me = rid();
         let open = false;
-        const link: Link = {
-          id: HOST,
-          send: (d) => open && ch.postMessage({ t: 'data', from: me, to: HOST, d }),
-          onData: () => {},
-          onClose: () => {},
-          close: () => {
+        const link = new CallbackLink(
+          HOST,
+          (d) => {
+            if (open) ch.postMessage({ t: 'data', from: me, to: HOST, d });
+          },
+          () => {
             if (!open) return;
             open = false;
             ch.postMessage({ t: 'close', from: me, to: HOST });
             ch.close();
           },
-        };
+        );
         if (typeof window !== 'undefined') window.addEventListener('pagehide', () => link.close());
         const timer = setTimeout(() => {
           ch.close();

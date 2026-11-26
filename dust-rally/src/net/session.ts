@@ -127,6 +127,7 @@ export class Session {
       }, 8000);
       link.onData = (d) => {
         const m = d as Msg;
+        if (!m || typeof m !== 'object') return; // ignore anything malformed
         if (m.k === 'welcome') {
           s.myId = m.id;
         } else if (m.k === 'reject') {
@@ -136,7 +137,9 @@ export class Session {
         } else if (m.k === 'lobby' && s.myId !== HOST_ID) {
           clearTimeout(timer);
           s.applyLobby(m);
-          link.onData = (d2) => s.onHostMsg(d2 as Msg);
+          link.onData = (d2) => {
+            if (d2 && typeof d2 === 'object') s.onHostMsg(d2 as Msg);
+          };
           resolve(s);
         }
       };
@@ -155,6 +158,7 @@ export class Session {
     let joined = false;
     link.onData = (d) => {
       const m = d as Msg;
+        if (!m || typeof m !== 'object') return; // ignore anything malformed
       if (!joined) {
         if (m.k !== 'hello') return;
         if (m.v !== PROTOCOL) return this.reject(link, 'version');
