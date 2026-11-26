@@ -944,3 +944,12 @@ kbd {
 #mp-name {
   text-transform: none;
 }
+.host-note {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 181, 46, 0.14);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+}

@@ -17,6 +17,8 @@ export interface HostTransport {
   onConnection: (link: Link) => void;
   /** the signalling connection was lost for good */
   onError: (msg: string) => void;
+  /** false while reconnecting to the signalling server (new friends can't join meanwhile) */
+  onOnline: (online: boolean) => void;
   close(): void;
 }
 
@@ -68,12 +70,36 @@ export async function peerDriver(): Promise<NetDriver> {
       return new Promise((resolve, reject) => {
         const peer = new Peer(PREFIX + code.toLowerCase());
         let ready = false;
+        let timer = 0;
+        const onVis = () => {
+          if (!document.hidden) reconnect();
+        };
         const t: HostTransport = {
           onConnection: () => {},
           onError: () => {},
-          close: () => peer.destroy(),
+          onOnline: () => {},
+          close: () => {
+            clearTimeout(timer);
+            document.removeEventListener('visibilitychange', onVis);
+            peer.destroy();
+          },
         };
+        // Lost the signalling server (e.g. the phone switched apps): races in progress keep
+        // working peer-to-peer; keep trying to re-register the room so new friends can join.
+        const reconnect = () => {
+          clearTimeout(timer);
+          if (peer.destroyed || !peer.disconnected) return;
+          try {
+            peer.reconnect();
+          } catch {
+            /* retried below */
+          }
+          timer = window.setTimeout(reconnect, 4000);
+        };
+        document.addEventListener('visibilitychange', onVis);
         peer.on('open', () => {
+          clearTimeout(timer);
+          if (ready) t.onOnline(true);
           ready = true;
           resolve(t);
         });
@@ -81,14 +107,17 @@ export async function peerDriver(): Promise<NetDriver> {
           conn.on('open', () => t.onConnection(wrap(conn)));
         });
         peer.on('disconnected', () => {
-          // lost the signalling server: existing races keep working, new joins need it
-          if (!peer.destroyed) peer.reconnect();
+          if (peer.destroyed) return;
+          t.onOnline(false);
+          timer = window.setTimeout(reconnect, 800);
         });
         peer.on('error', (e: Error & { type?: string }) => {
           if (!ready) {
             peer.destroy();
-            reject(new Error(e.type === 'unavailable-id' ? 'taken' : e.type === 'network' || e.type === 'server-error' ? 'offline' : e.message));
-          } else if (e.type === 'network' || e.type === 'server-error') t.onError('Lost connection to the room server');
+            reject(new Error(e.type === 'unavailable-id' ? 'taken' : e.type === 'network' || e.type === 'server-error' ? 'offline' : e.type || e.message));
+          } else if (e.type === 'unavailable-id') t.onError('The room code was taken over. Create a new room.');
+          // other errors after the room is open (network blips, a guest that vanished) are
+          // handled by the reconnect loop / per-connection close events
         });
       });
     },
@@ -102,9 +131,14 @@ export async function peerDriver(): Promise<NetDriver> {
           peer.destroy();
           reject(new Error(msg));
         };
-        const timer = setTimeout(() => fail('timeout'), 15000);
+        const timer = setTimeout(() => fail('timeout'), 12000);
         peer.on('open', () => {
           const conn = peer.connect(PREFIX + code.toLowerCase(), { reliable: true, serialization: 'json' });
+          conn.on('error', () => fail('connect-failed'));
+          const pc = conn.peerConnection;
+          pc?.addEventListener('connectionstatechange', () => {
+            if (pc.connectionState === 'failed') fail('connect-failed');
+          });
           conn.on('open', () => {
             if (settled) return;
             settled = true;
@@ -120,7 +154,7 @@ export async function peerDriver(): Promise<NetDriver> {
         });
         peer.on('error', (e: Error & { type?: string }) => {
           clearTimeout(timer);
-          fail(e.type === 'peer-unavailable' ? 'not-found' : e.type === 'network' || e.type === 'server-error' ? 'offline' : e.message);
+          fail(e.type === 'peer-unavailable' ? 'not-found' : e.type === 'network' || e.type === 'server-error' ? 'offline' : e.type || e.message);
         });
       });
     },
@@ -163,6 +197,7 @@ export function localDriver(): NetDriver {
       const t: HostTransport = {
         onConnection: () => {},
         onError: () => {},
+        onOnline: () => {},
         close: () => {
           for (const l of links.values()) l.close();
           ch.close();

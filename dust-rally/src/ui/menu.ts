@@ -44,6 +44,7 @@ export interface LobbyInfo {
   racing: boolean;
   stageId: string;
   shareUrl: string;
+  serverOnline: boolean;
   players: { name: string; color: string; me: boolean; host: boolean }[];
 }
 
@@ -321,6 +322,7 @@ export class Menu {
     return `<h2>Room</h2>
       <div class="room-code">${esc(L.code)}</div>
       <p class="muted small center">Tell your friends this code, or send them the link.</p>
+      ${L.isHost ? `<p class="host-note">${L.serverOnline ? '📱 Keep this game open on screen until everyone has joined. If you switch apps, friends can\'t connect.' : '⏳ Reconnecting to the room server… friends can join again in a moment.'}</p>` : ''}
       <div class="btn-row"><button class="btn tiny" data-act="copy-room">Copy invite link</button></div>
       <ul class="lobby-players">${rows.join('')}</ul>
       <div class="btn-row"><button class="btn tiny" data-act="garage">Change car / colour</button></div>
@@ -505,8 +507,8 @@ export class Menu {
         const L = this.mpInfo();
         if (L) {
           const text = `Race me in Dust Rally! Room code ${L.code}: ${L.shareUrl}`;
-          const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
-          if (isTouchDevice() && nav.share) void nav.share({ text }).catch(() => {});
+          const nav = navigator as Navigator & { share?: (d: { title: string; text: string; url: string }) => Promise<void> };
+          if (isTouchDevice() && nav.share) void nav.share({ title: 'Dust Rally', text: `Race me in Dust Rally! Room code ${L.code}`, url: L.shareUrl }).catch(() => {});
           else
             void navigator.clipboard?.writeText(text).then(
               () => (t.textContent = 'Copied!'),
