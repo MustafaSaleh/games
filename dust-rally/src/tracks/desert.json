@@ -1,0 +1,27 @@
+{
+  "id": "dune-run",
+  "name": "Dune Run",
+  "description": "Fast sweepers between sand dunes at sunset. Big jumps, soft sand on the edges.",
+  "biome": "desert",
+  "timeOfDay": "dusk",
+  "seed": 2207,
+  "width": 10,
+  "checkpoints": 6,
+  "rolls": 2.2,
+  "elevation": 1.1,
+  "bank": 1.2,
+  "propDensity": 1,
+  "points": [[0,0],[0,150],[60,300],[200,400],[330,470],[420,600],[400,780],[300,900],[260,1060],[330,1200],[480,1270],[600,1380],[620,1560],[520,1700],[380,1760],[300,1900],[340,2060],[460,2140]],
+  "surfaces": [
+    { "from": 0, "to": 500, "type": "gravel" },
+    { "from": 500, "to": 900, "type": "sand" },
+    { "from": 900, "to": 1500, "type": "dirt" },
+    { "from": 1500, "to": 1900, "type": "sand" },
+    { "from": 1900, "to": 9999, "type": "gravel" }
+  ],
+  "jumps": [
+    { "at": 420, "height": 3.0, "length": 26 },
+    { "at": 1350, "height": 3.4, "length": 28 },
+    { "at": 2350, "height": 2.6, "length": 24 }
+  ]
+}

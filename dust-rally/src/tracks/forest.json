@@ -1,0 +1,25 @@
+{
+  "id": "forest-ridge",
+  "name": "Forest Ridge",
+  "description": "Flowing gravel through pine forest. Two crests to fly over and a muddy valley.",
+  "biome": "forest",
+  "timeOfDay": "day",
+  "seed": 1101,
+  "width": 9,
+  "checkpoints": 5,
+  "rolls": 1.6,
+  "elevation": 1,
+  "bank": 1,
+  "propDensity": 1,
+  "points": [[0,0],[0,120],[40,220],[120,280],[160,380],[110,480],[20,540],[-60,640],[-50,760],[30,850],[140,880],[220,960],[200,1080],[120,1160],[40,1250],[60,1370],[150,1440],[180,1560],[120,1660],[20,1700]],
+  "surfaces": [
+    { "from": 0, "to": 700, "type": "gravel" },
+    { "from": 700, "to": 1000, "type": "dirt" },
+    { "from": 1000, "to": 1250, "type": "mud" },
+    { "from": 1250, "to": 9999, "type": "gravel" }
+  ],
+  "jumps": [
+    { "at": 330, "height": 2.2, "length": 24 },
+    { "at": 1560, "height": 2.8, "length": 26 }
+  ]
+}
