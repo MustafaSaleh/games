@@ -2,21 +2,34 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#1b1f26" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="Top-down low-poly rally racing in your browser: stages, endless procedural roads and a daily challenge." />
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
-    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
-    <title>Dust Rally</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Games</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; min-height: 100vh; background: #1b1f26; color: #f4f1ea; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 40px 16px; }
+      h1 { font-size: 40px; margin: 0 0 6px; }
+      p.sub { opacity: 0.7; margin: 0 0 28px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+      a.card { display: block; padding: 18px; border-radius: 14px; color: inherit; text-decoration: none; background: linear-gradient(160deg, #6b5a3a, #2a2219); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); }
+      a.card:hover { box-shadow: inset 0 0 0 2px #ffb52e; }
+      .title { font-size: 22px; font-weight: 900; }
+      .desc { opacity: 0.85; font-size: 14px; margin-top: 6px; }
+      .play { margin-top: 12px; font-weight: 800; color: #ffb52e; }
+    </style>
   </head>
   <body>
-    <canvas id="game"></canvas>
-    <div id="ui"></div>
-    <div id="boot">Loading…</div>
-    <script type="module" src="/src/main.ts"></script>
+    <main>
+      <h1>Games</h1>
+      <p class="sub">Browser games. Work on phone and desktop.</p>
+      <div class="grid">
+        <!-- add a card per game: href = folder name + "/" -->
+        <a class="card" href="dust-rally/">
+          <div class="title">Dust Rally</div>
+          <div class="desc">Top-down low-poly rally: stages, endless procedural roads and a daily challenge.</div>
+          <div class="play">Play ▸</div>
+        </a>
+      </div>
+    </main>
   </body>
 </html>
