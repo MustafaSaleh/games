@@ -4,6 +4,8 @@ import type { StageDef } from '../world/stage';
 import { fmtTime } from './hud';
 import type { CharacterView, Gesture } from '../render/character';
 import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle } from '../config/cars';
+import { load } from '../core/storage';
+import { isTouchDevice } from '../core/settings';
 
 export interface MenuHandlers {
   startStage(def: StageDef): void;
@@ -16,6 +18,33 @@ export interface MenuHandlers {
   enableTilt(): Promise<boolean>;
   settingsChanged(s: Settings): void;
   unlockAudio(): void;
+  startSplit(def: StageDef): void;
+  createRoom(name: string): void;
+  joinRoom(code: string, name: string): void;
+  leaveRoom(): void;
+  hostStage(stageId: string): void;
+  hostStart(): void;
+  toLobby(): void;
+}
+
+/** one row of the multiplayer results table */
+export interface Standing {
+  name: string;
+  color: string;
+  time: number | null;
+  status: string;
+  me: boolean;
+  progress: number;
+}
+
+/** what the lobby screen shows (provided by the game while in a room) */
+export interface LobbyInfo {
+  code: string;
+  isHost: boolean;
+  racing: boolean;
+  stageId: string;
+  shareUrl: string;
+  players: { name: string; color: string; me: boolean; host: boolean }[];
 }
 
 export interface StageInfo {
@@ -31,6 +60,11 @@ export interface ResultInfo {
   shareUrl?: string;
   record: boolean;
   canNext: boolean;
+  /** multiplayer */
+  standings?: Standing[];
+  online?: boolean;
+  /** online guest: the host decides what happens next */
+  waiting?: boolean;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -52,6 +86,12 @@ export class Menu {
   dailySeed = 0;
   result: ResultInfo | null = null;
   private returnTo = 'main';
+  /* online */
+  joinCode = '';
+  netError = '';
+  netBusy = '';
+  mpInfo: () => LobbyInfo | null = () => null;
+  private heroKey = '';
 
   constructor(
     parent: HTMLElement,
@@ -110,16 +150,31 @@ export class Menu {
     this.root.classList.toggle('with-hero', on);
     const c = this.character;
     if (!on) this.bubble.classList.remove('on');
+    const key = on ? this.current + ':' + (this.current === 'results' ? (this.result?.title ?? '') : '') : '';
+    const changed = key !== this.heroKey;
+    this.heroKey = key;
     if (!c) return;
     c.setActive(on);
-    if (!on) return;
+    if (!on || !changed) return;
     if (!this.heroIntroDone) {
       this.heroIntroDone = true;
       c.playIntro();
     } else if (this.current === 'results' && this.result) {
       const g: Gesture = this.result.record ? 'cheer' : 'wave';
       c.play(g);
-      this.say(this.result.record ? 'New record! 🏆' : this.result.canNext ? 'Nice drive! 🏁' : "Let's go again! 💪");
+      if (this.result.standings) this.say(this.result.record ? this.result.title : 'Great race! 🏁');
+      else this.say(this.result.record ? 'New record! 🏆' : this.result.canNext ? 'Nice drive! 🏁' : "Let's go again! 💪");
+    }
+  }
+
+  /** re-render the current screen (e.g. lobby or standings changed), keeping typed input */
+  refresh(): void {
+    if (!this.visible) return;
+    const keep = ['mp-name', 'mp-code'].map((id) => [id, (this.root.querySelector('#' + id) as HTMLInputElement | null)?.value] as const);
+    this.render();
+    for (const [id, v] of keep) {
+      const el = this.root.querySelector('#' + id) as HTMLInputElement | null;
+      if (el && v != null) el.value = v;
     }
   }
 
@@ -151,6 +206,14 @@ export class Menu {
               ? this.settingsHtml()
               : s === 'garage'
                 ? this.garageHtml()
+              : s === 'multi'
+                ? this.multiHtml()
+              : s === 'split'
+                ? this.splitHtml()
+              : s === 'online'
+                ? this.onlineHtml()
+              : s === 'lobby'
+                ? this.lobbyHtml()
               : s === 'pause'
                 ? this.pauseHtml()
                 : s === 'results'
@@ -167,6 +230,7 @@ export class Menu {
       <div class="tagline">Top-down rally · drift · jump · survive</div>
       <div class="btn-col">
         <button class="btn primary" data-act="stages">Stages</button>
+        <button class="btn" data-act="multi">Multiplayer<small>Split-screen · online with friends</small></button>
         <button class="btn" data-act="endless">Endless</button>
         <button class="btn" data-act="daily">Daily Challenge<small>Seed ${seedToString(this.dailySeed)} · Best ${this.dailyBest ? Math.floor(this.dailyBest) + ' m' : '—'}</small></button>
         <button class="btn" data-act="garage">Garage<small>${esc(getStyle(settings.carStyle).name)} · ${esc(getLivery(settings.carLivery).name)}</small></button>
@@ -176,10 +240,15 @@ export class Menu {
   }
 
   private stagesHtml(): string {
-    const cards = this.stages
+    return `<h2>Stages</h2><div class="cards">${this.stageCards('stage')}</div>
+      <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
+  }
+
+  private stageCards(act: string): string {
+    return this.stages
       .map(
         (s, i) => `
-      <button class="card biome-${esc(s.def.biome)}" data-act="stage" data-i="${i}">
+      <button class="card biome-${esc(s.def.biome)}" data-act="${act}" data-i="${i}">
         <div class="card-title">${esc(s.def.name)}</div>
         <div class="card-sub">${esc(s.def.biome)} · ${esc(s.def.timeOfDay)}</div>
         <div class="card-desc">${esc(s.def.description ?? '')}</div>
@@ -187,8 +256,83 @@ export class Menu {
       </button>`,
       )
       .join('');
-    return `<h2>Stages</h2><div class="cards">${cards}</div>
+  }
+
+  /* ----------------------------- multiplayer ----------------------------- */
+
+  private multiHtml(): string {
+    return `<h2>Multiplayer</h2>
+      <div class="btn-col">
+        <button class="btn primary" data-act="split">Split-screen<small>2 players · one screen · keyboard or 2 gamepads</small></button>
+        <button class="btn" data-act="online">Online with friends<small>2–4 players · each on their own device</small></button>
+        <button class="btn ghost" data-act="back">Back</button>
+      </div>`;
+  }
+
+  private splitHtml(): string {
+    const touchOnly = isTouchDevice() && !matchMedia('(any-pointer: fine)').matches;
+    return `<h2>Split-screen</h2>
+      <div class="controls-help">
+        <div><b class="p1">P1</b> W A S D · <kbd>Space</kbd> drift · <kbd>R</kbd> reset</div>
+        <div><b class="p2">P2</b> Arrow keys · <kbd>Right Shift</kbd> drift · <kbd>Enter</kbd> reset</div>
+        <div class="muted small">Gamepads: first pad = P1, second pad = P2.</div>
+      </div>
+      ${touchOnly ? '<p class="net-error">Split-screen needs a keyboard or two gamepads connected to this device.</p>' : ''}
+      <p class="muted small">Pick a stage. First across the finish line wins!</p>
+      <div class="cards">${this.stageCards('split-stage')}</div>
       <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
+  }
+
+  private onlineHtml(): string {
+    const name = esc(load<string>('mp.name', ''));
+    const busy = !!this.netBusy;
+    return `<h2>Online race</h2>
+      <p class="muted small">Race friends on their own phones or computers. Private rooms with a code — no chat.</p>
+      <label class="field">Your racer name<input id="mp-name" type="text" maxlength="12" value="${name}" placeholder="Mody" autocomplete="off"></label>
+      <div class="btn-col">
+        <button class="btn primary" data-act="create-room" ${busy ? 'disabled' : ''}>Create a room</button>
+      </div>
+      <div class="or"><span>or join a friend's room</span></div>
+      <label class="field">Room code<input id="mp-code" type="text" maxlength="12" value="${esc(this.joinCode)}" placeholder="TIGER-42" autocomplete="off" autocapitalize="characters"></label>
+      <div class="btn-col">
+        <button class="btn" data-act="join-room" ${busy ? 'disabled' : ''}>Join</button>
+      </div>
+      ${busy ? `<p class="net-busy">${esc(this.netBusy)}</p>` : ''}
+      ${this.netError ? `<p class="net-error">${esc(this.netError)}</p>` : ''}
+      <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
+  }
+
+  private lobbyHtml(): string {
+    const L = this.mpInfo();
+    if (!L) return `<h2>Room closed</h2><div class="btn-row"><button class="btn ghost" data-act="quit">Menu</button></div>`;
+    const rows = [];
+    for (let i = 0; i < 4; i++) {
+      const p = L.players[i];
+      rows.push(
+        p
+          ? `<li class="${p.me ? 'me' : ''}"><i style="background:${p.color}"></i><b>${esc(p.name)}</b>${p.me ? '<span class="tag">you</span>' : ''}${p.host ? '<span class="tag host">host</span>' : ''}</li>`
+          : `<li class="empty"><i></i>waiting for a friend…</li>`,
+      );
+    }
+    const stage = this.stages.find((s) => s.def.id === L.stageId)?.def;
+    const stageSel = L.isHost
+      ? `<label class="field">Stage<select data-host-stage>${this.stages.map((s) => `<option value="${esc(s.def.id)}" ${s.def.id === L.stageId ? 'selected' : ''}>${esc(s.def.name)}</option>`).join('')}</select></label>`
+      : `<p class="muted">Stage: <b>${esc(stage?.name ?? '—')}</b></p>`;
+    return `<h2>Room</h2>
+      <div class="room-code">${esc(L.code)}</div>
+      <p class="muted small center">Tell your friends this code, or send them the link.</p>
+      <div class="btn-row"><button class="btn tiny" data-act="copy-room">Copy invite link</button></div>
+      <ul class="lobby-players">${rows.join('')}</ul>
+      <div class="btn-row"><button class="btn tiny" data-act="garage">Change car / colour</button></div>
+      ${stageSel}
+      <div class="btn-col">
+        ${
+          L.isHost
+            ? `<button class="btn primary" data-act="host-start">${L.players.length < 2 ? 'Start (on your own)' : 'Start race!'}</button>`
+            : `<p class="net-busy">${L.racing ? 'A race is on — you will join the next one.' : 'Waiting for the host to start…'}</p>`
+        }
+        <button class="btn ghost" data-act="leave-room">Leave room</button>
+      </div>`;
   }
 
   private endlessHtml(): string {
@@ -269,16 +413,36 @@ export class Menu {
   }
 
   private pauseHtml(): string {
-    return `<h2>Paused</h2><div class="btn-col">
-      <button class="btn primary" data-act="resume">Resume</button>
-      <button class="btn" data-act="restart">Restart</button>
+    const online = !!this.mpInfo();
+    return `<h2>${online ? 'Race menu' : 'Paused'}</h2>${online ? '<p class="muted small">The race keeps going for everyone else!</p>' : ''}<div class="btn-col">
+      <button class="btn primary" data-act="resume">${online ? 'Back to the race' : 'Resume'}</button>
+      ${online ? '' : '<button class="btn" data-act="restart">Restart</button>'}
       <button class="btn ghost" data-act="settings">Settings</button>
-      <button class="btn ghost" data-act="quit">Quit to menu</button></div>`;
+      <button class="btn ghost" data-act="quit">${online ? 'Leave race (back to room)' : 'Quit to menu'}</button></div>`;
   }
 
   private resultsHtml(): string {
     const r = this.result;
     if (!r) return '';
+    if (r.standings) {
+      const rows = r.standings
+        .map(
+          (s, i) =>
+            `<li class="${s.me ? 'me' : ''}"><span class="place">${s.time != null ? i + 1 : '–'}</span><i style="background:${s.color}"></i><b>${esc(s.name)}</b><span class="st">${esc(s.status)}</span></li>`,
+        )
+        .join('');
+      return `<h2 class="${r.record ? 'record' : ''}">${esc(r.title)}</h2>
+        ${r.lines.map((l) => `<div class="result-line">${esc(l)}</div>`).join('')}
+        <ol class="standings">${rows}</ol>
+        <div class="btn-col">
+          ${
+            r.waiting
+              ? '<p class="net-busy">Waiting for the host to start the next race…</p>'
+              : `<button class="btn primary" data-act="restart">Race again</button>${r.canNext ? '<button class="btn" data-act="next">Next stage</button>' : ''}`
+          }
+          <button class="btn ghost" data-act="${r.online ? 'lobby' : 'quit'}">${r.online ? 'Back to room' : 'Menu'}</button>
+        </div>`;
+    }
     return `<h2 class="${r.record ? 'record' : ''}">${esc(r.title)}</h2>
       <div class="result-big">${esc(r.big)}</div>
       ${r.lines.map((l) => `<div class="result-line">${esc(l)}</div>`).join('')}
@@ -299,8 +463,58 @@ export class Menu {
       case 'endless':
       case 'settings':
       case 'garage':
+      case 'multi':
+      case 'split':
         this.show(act, true);
         break;
+      case 'online':
+        this.netError = '';
+        this.show(act, true);
+        break;
+      case 'split-stage':
+        this.h.startSplit(this.stages[Number(t.dataset.i)].def);
+        break;
+      case 'create-room':
+      case 'join-room': {
+        const name = (this.root.querySelector('#mp-name') as HTMLInputElement | null)?.value ?? '';
+        const code = (this.root.querySelector('#mp-code') as HTMLInputElement | null)?.value ?? '';
+        if (!name.trim()) {
+          this.netError = 'Type your racer name first.';
+          this.refresh();
+          (this.root.querySelector('#mp-name') as HTMLInputElement | null)?.focus();
+        } else if (act === 'join-room' && !code.trim()) {
+          this.netError = 'Type the room code your friend gave you.';
+          this.refresh();
+        } else if (act === 'create-room') this.h.createRoom(name);
+        else {
+          this.joinCode = code;
+          this.h.joinRoom(code, name);
+        }
+        break;
+      }
+      case 'leave-room':
+        this.h.leaveRoom();
+        break;
+      case 'host-start':
+        this.h.hostStart();
+        break;
+      case 'lobby':
+        this.h.toLobby();
+        break;
+      case 'copy-room': {
+        const L = this.mpInfo();
+        if (L) {
+          const text = `Race me in Dust Rally! Room code ${L.code}: ${L.shareUrl}`;
+          const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
+          if (isTouchDevice() && nav.share) void nav.share({ text }).catch(() => {});
+          else
+            void navigator.clipboard?.writeText(text).then(
+              () => (t.textContent = 'Copied!'),
+              () => (t.textContent = 'Copy failed'),
+            );
+        }
+        break;
+      }
       case 'car-style':
       case 'car-livery':
         updateSettings(act === 'car-style' ? { carStyle: t.dataset.id! } : { carLivery: t.dataset.id! });
@@ -346,6 +560,10 @@ export class Menu {
 
   private onChange(e: Event): void {
     const el = e.target as HTMLInputElement | HTMLSelectElement;
+    if (el instanceof HTMLSelectElement && el.hasAttribute('data-host-stage')) {
+      if (e.type === 'change') this.h.hostStage(el.value);
+      return;
+    }
     const key = el.dataset?.set as keyof Settings | undefined;
     if (!key) return;
     let v: unknown;

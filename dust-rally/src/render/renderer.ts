@@ -111,6 +111,41 @@ export class Renderer3D {
   render(camera: THREE.Camera): void {
     this.renderer.render(this.scene, camera);
   }
+
+  /** Split-screen: side by side in landscape, stacked in portrait. Returns viewport rects in CSS px. */
+  static splitRects(w: number, h: number, n: number): { x: number; y: number; w: number; h: number }[] {
+    const out = [];
+    const side = w >= h;
+    for (let i = 0; i < n; i++) {
+      if (side) {
+        const x0 = Math.floor((i * w) / n),
+          x1 = Math.floor(((i + 1) * w) / n);
+        out.push({ x: x0, y: 0, w: x1 - x0, h });
+      } else {
+        const y0 = Math.floor((i * h) / n),
+          y1 = Math.floor(((i + 1) * h) / n);
+        out.push({ x: 0, y: y0, w, h: y1 - y0 });
+      }
+    }
+    return out;
+  }
+
+  renderSplit(cameras: THREE.Camera[]): void {
+    const r = this.renderer;
+    const w = window.innerWidth,
+      h = window.innerHeight;
+    const rects = Renderer3D.splitRects(w, h, cameras.length);
+    r.setScissorTest(true);
+    for (let i = 0; i < cameras.length; i++) {
+      const q = rects[i];
+      const y = h - q.y - q.h; // GL origin is bottom-left
+      r.setViewport(q.x, y, q.w, q.h);
+      r.setScissor(q.x, y, q.w, q.h);
+      r.render(this.scene, cameras[i]);
+    }
+    r.setScissorTest(false);
+    r.setViewport(0, 0, w, h);
+  }
 }
 
 function lightLevel(p: LightingPreset): number {

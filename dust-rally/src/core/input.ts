@@ -43,24 +43,33 @@ export class Input implements CarInput {
     return !!this.padEdge[btn];
   }
 
+  /**
+   * Which controls this Input reads. 'all' (single player) merges everything.
+   * Split-screen: 'p1' = WASD + Space + first gamepad + touch; 'p2' = arrows + Right Shift / Enter + second gamepad.
+   */
+  scheme: 'all' | 'p1' | 'p2' = 'all';
+
   update(dt: number): void {
     const k = this.keys;
-    const left = k.has('KeyA') || k.has('ArrowLeft');
-    const right = k.has('KeyD') || k.has('ArrowRight');
+    const kb1 = this.scheme !== 'p2',
+      kb2 = this.scheme !== 'p1';
+    const left = (kb1 && k.has('KeyA')) || (kb2 && k.has('ArrowLeft'));
+    const right = (kb1 && k.has('KeyD')) || (kb2 && k.has('ArrowRight'));
     const target = (right ? 1 : 0) - (left ? 1 : 0);
     // digital steering ramps in (and snaps back faster) for smoothness
     const rate = target === 0 ? 7 : Math.sign(target) !== Math.sign(this.kbSteer) && this.kbSteer !== 0 ? 9 : 4.5;
     this.kbSteer += clamp(target - this.kbSteer, -rate * dt, rate * dt);
 
     let steer = this.kbSteer;
-    let throttle = k.has('KeyW') || k.has('ArrowUp') ? 1 : 0;
-    let brake = k.has('KeyS') || k.has('ArrowDown') ? 1 : 0;
-    let hb = k.has('Space');
+    let throttle = (kb1 && k.has('KeyW')) || (kb2 && k.has('ArrowUp')) ? 1 : 0;
+    let brake = (kb1 && k.has('KeyS')) || (kb2 && k.has('ArrowDown')) ? 1 : 0;
+    let hb = (kb1 && k.has('Space')) || (this.scheme === 'p2' && (k.has('ShiftRight') || k.has('Enter') || k.has('NumpadEnter')));
 
-    // gamepad
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    for (const p of pads) {
-      if (!p || !p.connected) continue;
+    // gamepad: 'all' uses the first connected pad, p1/p2 the first/second
+    const pads = (navigator.getGamepads ? [...navigator.getGamepads()] : []).filter((p) => p && p.connected);
+    const want = this.scheme === 'p2' ? 1 : 0;
+    for (let pi = want; pi < pads.length; pi++) {
+      const p = pads[pi]!;
       const ax = p.axes[0] ?? 0;
       const sx = Math.abs(ax) > 0.12 ? (ax - Math.sign(ax) * 0.12) / 0.88 : 0;
       if (Math.abs(sx) > Math.abs(steer)) steer = sx;
@@ -79,14 +88,14 @@ export class Input implements CarInput {
 
     // touch
     const t = this.touch;
-    if (t.active) {
+    if (t.active && this.scheme !== 'p2') {
       if (settings.steer !== 'tilt' && Math.abs(t.steer) > Math.abs(steer)) steer = t.steer;
       throttle = Math.max(throttle, t.gas);
       brake = Math.max(brake, t.brake);
       hb = hb || t.handbrake;
       if (settings.autoGas && brake === 0 && !t.handbrake) throttle = 1;
     }
-    if (settings.steer === 'tilt' && this.tiltActive && Math.abs(this.tiltSteer) > Math.abs(steer)) steer = this.tiltSteer;
+    if (this.scheme !== 'p2' && settings.steer === 'tilt' && this.tiltActive && Math.abs(this.tiltSteer) > Math.abs(steer)) steer = this.tiltSteer;
 
     if (!this.enabled) {
       steer = 0;

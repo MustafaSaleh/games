@@ -720,3 +720,227 @@ h2.record {
 .livery-name {
   color: var(--accent);
 }
+
+/* ---------------- multiplayer ---------------- */
+.panel-split {
+  width: min(760px, 100%);
+}
+.field select {
+  font: 700 16px var(--font);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 0;
+}
+.center {
+  text-align: center;
+}
+.controls-help {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 14px;
+}
+.controls-help b {
+  display: inline-block;
+  min-width: 30px;
+  font-weight: 900;
+}
+.controls-help b.p1 {
+  color: var(--accent);
+}
+.controls-help b.p2 {
+  color: #7cc6e0;
+}
+kbd {
+  font: 700 12px var(--font);
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+.or::before,
+.or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.25);
+}
+.net-error {
+  color: #ff7a6a;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+}
+.net-busy {
+  text-align: center;
+  font-weight: 700;
+  opacity: 0.85;
+  animation: pulse 0.8s infinite alternate;
+}
+.btn[disabled] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.room-code {
+  text-align: center;
+  font-size: clamp(34px, 9vmin, 48px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.lobby-players,
+.standings {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.lobby-players li,
+.standings li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 16px;
+}
+.lobby-players li.me,
+.standings li.me {
+  background: rgba(255, 181, 46, 0.18);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 181, 46, 0.6);
+}
+.lobby-players li.empty {
+  opacity: 0.45;
+  font-style: italic;
+  font-size: 14px;
+}
+.lobby-players i,
+.standings i,
+.split-tag i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+.lobby-players .tag {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.lobby-players .tag + .tag {
+  margin-left: 6px;
+}
+.lobby-players .tag.host {
+  color: var(--accent);
+  opacity: 1;
+}
+.standings .place {
+  width: 22px;
+  font-weight: 900;
+  font-size: 18px;
+  text-align: center;
+}
+.standings li:first-child .place {
+  color: var(--accent);
+}
+.standings .st {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* name tags over online players' cars */
+.name-tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.name-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(10, 12, 16, 0.72);
+  border: 2px solid var(--c, #fff);
+  font-weight: 800;
+  font-size: 13px;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* split-screen HUD */
+.split-tag,
+.split-divider {
+  display: none;
+}
+.hud.split .split-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: absolute;
+  bottom: calc(14px + var(--sab));
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(10, 12, 16, 0.62);
+  font-weight: 800;
+  font-size: 14px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.hud.split .split-tag.p1 {
+  left: 25%;
+}
+.hud.split .split-tag.p2 {
+  left: 75%;
+}
+.hud.split .split-divider {
+  display: block;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  background: rgba(10, 12, 16, 0.8);
+}
+.hud.split .hud-speed {
+  display: none;
+}
+.hud.split.split-stacked .split-tag {
+  left: 50%;
+}
+.hud.split.split-stacked .split-tag.p1 {
+  bottom: calc(50% + 10px);
+}
+.hud.split.split-stacked .split-divider {
+  top: 50%;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 3px;
+  margin: -1.5px 0 0;
+}
+#mp-name {
+  text-transform: none;
+}
