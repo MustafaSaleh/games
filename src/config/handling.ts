@@ -41,7 +41,7 @@ export const HANDLING = {
   // --- terrain / air ---
   slopeGravity: 12, // gravity used for the along-slope pull (lower = less uphill penalty)
   airGravity: 20, // gravity while airborne (arcade: > 9.81 so jumps aren't floaty)
-  airborneGap: 0.09, // m above ground before we count as airborne
+  airborneGap: 0.035, // m above ground before we count as airborne
   airYawControl: 1.2, // how much you can rotate in the air
   airDrag: 0.01,
   landingSpeedLoss: 0.012, // fraction of speed lost per m/s of landing impact

@@ -127,7 +127,6 @@ export class Chunk {
       for (let j = j0; j <= j1; j++) {
         const z = z0 + j * STEP;
         world.biomeAt(x0, z, mix);
-        if (j >= 0 && j < V) rowMix[j] = mix.t;
         for (let i = -1; i <= V; i++) {
           const x = x0 + i * STEP;
           world.evalPoint(x, z, bandCands, nc, mix, pt);
@@ -233,8 +232,9 @@ export class Chunk {
     this.box.max.set(x0 + SIZE, maxH + 6, z0 + SIZE);
     yield;
 
-    this.placeProps(world, propMul, mix);
+    yield* this.placeProps(world, propMul, mix);
     this.placeMarkers(world, allCands);
+    this.buildColliderGrid();
   }
 
   /** Reflector posts along both road edges. */
@@ -261,7 +261,7 @@ export class Chunk {
     }
   }
 
-  private placeProps(world: World, propMul: number, mix: BiomeMix): void {
+  private *placeProps(world: World, propMul: number, mix: BiomeMix): Generator<void, void, void> {
     const rng = chunkRng;
     rng.seed(hashInts(this.cx, this.cz, world.seed));
     for (const t of PROP_TYPES) this.props[t].count = 0;
@@ -306,6 +306,7 @@ export class Chunk {
                   : pal.bush;
           this.addProp(rule.type, x, z, lx, lz, s, rng.next() * Math.PI * 2, color);
         }
+        yield;
       }
     }
     // endless difficulty: rocks close to the road edge
@@ -321,7 +322,10 @@ export class Chunk {
         this.addProp('rock', this.x0 + lx, this.z0 + lz, lx, lz, rng.range(0.7, 1.3), rng.next() * 6.28, pal.rock);
       }
     }
-    // build collider grid (counting sort into cells)
+  }
+
+  /** Collider grid: counting sort of colliders into 8x8 cells. */
+  private buildColliderGrid(): void {
     const cs = this.cellStart;
     cs.fill(0);
     for (let i = 0; i < this.colCount; i++) cs[this.cellOf[i] + 1]++;
@@ -379,7 +383,6 @@ export class Chunk {
 
 const scratchCands: number[] = [];
 const bandCands: number[] = [];
-const rowMix = new Float32Array(V);
 const scratchFill = new Uint16Array(COL_CELLS * COL_CELLS);
 const chunkRng = new Rng(1);
 const tmpMix: BiomeMix = { a: null!, b: null!, t: 0 };

@@ -539,3 +539,12 @@ h2.record {
     min-height: 40px;
   }
 }
+
+@media (orientation: portrait) {
+  .hud-speed {
+    bottom: calc(232px + var(--sab));
+    left: auto;
+    right: calc(22px + var(--sar));
+    transform: none;
+  }
+}

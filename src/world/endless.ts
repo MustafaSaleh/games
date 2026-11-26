@@ -4,7 +4,7 @@ import { SURFACE_INDEX } from '../config/surfaces';
 import { clamp, range, smoothstep } from '../core/math';
 import { Simplex2 } from '../core/noise';
 import { Rng, hashInts } from '../core/rng';
-import { jumpProfile, type Gate } from './stage';
+import { jumpProfile, jumpWindow, type Gate } from './stage';
 import { World, makeBiomeRuntime, type BiomeMix, type BiomeRuntime } from './world';
 
 /**
@@ -141,7 +141,7 @@ export class EndlessWorld extends World {
 
     const rollAmp = range(ENDLESS.rollAmp, d) * (0.35 + 0.65 * (this.rollN.noise1(s / 380) * 0.5 + 0.5));
     let h = this.roadBase(x, z, this.mix);
-    h += rollAmp * this.rollN.noise1(s / 68 + 3);
+    h += (1 - jumpWindow(s - this.jump.at, this.jump.len)) * rollAmp * this.rollN.noise1(s / 68 + 3);
     h += jumpProfile(s - this.jump.at, this.jump.h, this.jump.len);
     const bank = clamp(this.lastCurv * BANK_FACTOR, -BANK_MAX, BANK_MAX);
     tr.push(x, z, h, Math.sin(this.heading), Math.cos(this.heading), range(ENDLESS.roadHalfWidth, d), bank, this.zoneSurf);

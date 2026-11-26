@@ -28,12 +28,12 @@ self.addEventListener('fetch', (e) => {
           caches.open(CACHE).then((c) => c.put('./', copy));
           return r;
         })
-        .catch(() => caches.match('./', { ignoreSearch: true }).then((r) => r || caches.match('./index.html'))),
+        .catch(() => caches.match('./', { ignoreSearch: true, ignoreVary: true }).then((r) => r || caches.match('./index.html'))),
     );
     return;
   }
   e.respondWith(
-    caches.match(req, { ignoreSearch: true }).then(
+    caches.match(req, { ignoreSearch: true, ignoreVary: true }).then(
       (hit) =>
         hit ||
         fetch(req).then((r) => {

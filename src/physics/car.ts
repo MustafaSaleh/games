@@ -203,7 +203,7 @@ export class Car {
     const gNew = ground.heightAt(this.x, this.z);
     if (!this.airborne) {
       const yB = this.y + this.vy * dt - 0.5 * G * dt * dt;
-      if (yB > gNew + H.airborneGap && this.vy > 0.5) {
+      if (yB > gNew + H.airborneGap && this.vy > 1.2) {
         this.airborne = true;
         this.airTime = 0;
         this.y = yB;

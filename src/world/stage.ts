@@ -2,7 +2,7 @@ import { BIOMES } from '../config/biomes';
 import { BANK_FACTOR, BANK_MAX, STAGE_DEFAULTS } from '../config/game';
 import type { TimeOfDay } from '../config/lighting';
 import { SURFACE_INDEX, type SurfaceId } from '../config/surfaces';
-import { clamp, wrapAngle } from '../core/math';
+import { clamp, smoothstep, wrapAngle } from '../core/math';
 import { Simplex2 } from '../core/noise';
 import { World, makeBiomeRuntime, type BiomeMix, type BiomeRuntime } from './world';
 
@@ -33,11 +33,16 @@ export interface Gate {
 }
 
 /** Kicker-style jump: concave ramp up to the lip, then a smooth landing slope. */
+export function jumpWindow(rel: number, length: number): number {
+  // 1 inside the jump (rolls suppressed so the landing is always a drop), fades at the edges
+  return smoothstep(-length - 30, -length - 5, rel) * (1 - smoothstep(length, length + 25, rel));
+}
+
 export function jumpProfile(rel: number, height: number, length: number): number {
   if (rel < -length || rel > length * 0.85) return 0;
   if (rel <= 0) {
     const u = (rel + length) / length;
-    return height * u * u;
+    return height * Math.pow(u, 2.4);
   }
   const u = rel / (length * 0.85);
   return height * (1 - u * u * (3 - 2 * u));
@@ -150,7 +155,9 @@ export class StageWorld extends World {
     for (let i = 0; i < n; i++) {
       const s = i * sp;
       let h = baseS[i];
-      h += rolls * rollsN.noise1(s / 70) * (0.55 + 0.45 * rollsN.noise1(s / 400 + 9));
+      let calm = 1;
+      for (const j of jumps) calm *= 1 - jumpWindow(s - j.at, j.length ?? 24);
+      h += calm * rolls * rollsN.noise1(s / 70) * (0.55 + 0.45 * rollsN.noise1(s / 400 + 9));
       for (const j of jumps) h += jumpProfile(s - j.at, j.height, j.length ?? 24);
       let surf = defaultSurf;
       for (const z of zones) if (s >= z.from && s < z.to) surf = z.surf;

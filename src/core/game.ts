@@ -629,6 +629,8 @@ export class Game {
       terrain = this.terrain!;
     this.gates.begin(dt);
     const next = race.nextGate();
+    // start line (stages)
+    if (this.world instanceof StageWorld && race.time < 30) this.gates.draw(tr, this.world.startIdx + 4, 0, true, terrain);
     for (const g of race.gates) {
       if (g.idx < tr.start || g.idx >= tr.end) continue;
       const dx = tr.x(g.idx) - this.car.x,
