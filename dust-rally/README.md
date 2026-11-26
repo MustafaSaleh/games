@@ -39,6 +39,10 @@ The build writes `dist/sw.js` with a precache list of every built file (see `vit
 
 **Multiplayer** in the main menu has two modes. Both race the hand-made stages; first across the line wins. Cars collide: they bounce off each other, get pushed and spun by side hits, and throw sparks (`resolveCarCar` in `physics/collisions.ts`; sparks in `render/effects.ts`). In split-screen both cars are simulated together; online, each device moves only its own car off the other players' (interpolated) cars, so both sides feel the bump.
 
+### Tomato fight 🍅
+
+In both multiplayer modes, the first racer through each checkpoint earns a tomato (up to 3, shown in the HUD). Throw it back at whoever is chasing you: **F** (P1), **/** or **Right Ctrl** (P2), gamepad **LB**, or the 🍅 touch button. The throw aims at the nearest car behind and leads it; with nobody behind, it just flies back and splats on the road. A hit covers the victim's view (only their half in split-screen) with tomato until an automatic squeegee wipes it clean. Online, the host decides who was first through a checkpoint, and each player's own device decides whether a tomato hit them. Code: `src/core/tomatoes.ts`, `src/ui/splat.ts`; tuning in `TOMATO`.
+
 ### Split-screen (one device)
 
 Two views side by side (stacked on a tall screen). Player 2 gets a different colour automatically.
@@ -62,13 +66,15 @@ Kid-safe by design: private rooms only, no public lobby, no chat, names up to 12
 
 Limitations: it depends on the public PeerJS server being up; some strict school or office networks block WebRTC; the room closes if the host leaves.
 
+Every player must run the same build: the online screen shows the game version, and a friend on a different version is turned away with "reload the page" instead of failing silently.
+
 For development, add `?net=local` to use a BroadcastChannel transport instead of PeerJS: open two tabs of the same browser, create a room in one and join it from the other.
 
 ## Controls
 
 | | |
 |---|---|
-| Keyboard | WASD / arrows; Space = handbrake; R = reset car onto the road; C = switch camera; Esc / P = pause |
+| Keyboard | WASD / arrows; Space = handbrake; R = reset car onto the road; C = switch camera; F = throw a tomato (multiplayer); Esc / P = pause |
 | Gamepad | Left stick steers; RT / A = gas; LT / X = brake/reverse; B / RB = handbrake; Y = reset; Back = switch camera; Start = pause |
 | Touch | Left thumb: floating joystick (or ◀ ▶ zones). Right side: GAS, BRAKE (hold to reverse), DRIFT (handbrake) |
 | Tilt | Settings → Steering → Tilt. On iOS this asks for motion permission. Calibrated level when a race starts |

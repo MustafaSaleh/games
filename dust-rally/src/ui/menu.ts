@@ -6,6 +6,7 @@ import type { CharacterView, Gesture } from '../render/character';
 import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle } from '../config/cars';
 import { load } from '../core/storage';
 import { isTouchDevice } from '../core/settings';
+import { BUILD } from '../net/session';
 
 export interface MenuHandlers {
   startStage(def: StageDef): void;
@@ -300,6 +301,7 @@ export class Menu {
       </div>
       ${busy ? `<p class="net-busy">${esc(this.netBusy)}</p>` : ''}
       ${this.netError ? `<p class="net-error">${esc(this.netError)}</p>` : ''}
+      <p class="muted small center">Game version <b>${esc(BUILD)}</b> — every player needs the same one.</p>
       <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
   }
 
@@ -321,7 +323,7 @@ export class Menu {
       : `<p class="muted">Stage: <b>${esc(stage?.name ?? '—')}</b></p>`;
     return `<h2>Room</h2>
       <div class="room-code">${esc(L.code)}</div>
-      <p class="muted small center">Tell your friends this code, or send them the link.</p>
+      <p class="muted small center">Tell your friends this code, or send them the link. · v ${esc(BUILD)}</p>
       ${L.isHost ? `<p class="host-note">${L.serverOnline ? '📱 Keep this game open on screen until everyone has joined. If you switch apps, friends can\'t connect.' : '⏳ Reconnecting to the room server… friends can join again in a moment.'}</p>` : ''}
       <div class="btn-row"><button class="btn tiny" data-act="copy-room">Copy invite link</button></div>
       <ul class="lobby-players">${rows.join('')}</ul>

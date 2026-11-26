@@ -2,6 +2,17 @@ import { defineConfig, type Plugin } from 'vite';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
+
+/** short commit id shown in the menu and checked when a friend joins an online room */
+function buildId(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return 'dev';
+  }
+}
 
 /** Writes dist/sw.js with a precache list of every built file (offline after first load). */
 function serviceWorker(): Plugin {
@@ -35,6 +46,7 @@ function serviceWorker(): Plugin {
 
 export default defineConfig({
   base: './',
+  define: { __BUILD__: JSON.stringify(buildId()) },
   build: {
     target: 'es2020',
     sourcemap: false,

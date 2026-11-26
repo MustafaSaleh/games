@@ -9,6 +9,8 @@ import type { HostTransport, Link, NetDriver } from './transport';
 export const MAX_PLAYERS = 4;
 const PROTOCOL = 1;
 export const HOST_ID = 'host';
+/** this build's id: a friend on a different build is turned away with a clear message */
+export const BUILD = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev';
 
 export interface MpPlayer {
   id: string;
@@ -22,14 +24,18 @@ export interface MpPlayer {
 export type PoseArr = number[];
 
 type Msg =
-  | { k: 'hello'; v: number; name: string; style: string; livery: string }
+  | { k: 'hello'; v: number; build?: string; name: string; style: string; livery: string }
   | { k: 'welcome'; id: string }
   | { k: 'reject'; reason: string }
   | { k: 'lobby'; players: MpPlayer[]; stageId: string; racing: boolean }
   | { k: 'start'; stageId: string; players: MpPlayer[] }
   | { k: 'pose'; id?: string; p: PoseArr }
   | { k: 'finish'; id?: string; time: number }
-  | { k: 'car'; style: string; livery: string };
+  | { k: 'car'; style: string; livery: string }
+  | { k: 'claim'; gate: number }
+  | { k: 'award'; id: string; gate: number }
+  | { k: 'throw'; id?: string; p: number[] }
+  | { k: 'splat'; id?: string; by: string };
 
 const WORDS = ['TIGER', 'ROCKET', 'DUST', 'TURBO', 'CACTUS', 'COMET', 'EAGLE', 'FOX', 'LIZARD', 'STORM', 'DRIFT', 'GECKO', 'FALCON', 'BISON', 'MOJAVE', 'SPARK'];
 
@@ -63,6 +69,12 @@ export interface SessionEvents {
   finish(id: string, time: number): void;
   left(id: string): void;
   closed(reason: string): void;
+  /** tomato fight: `id` was first through checkpoint `gate` and earned a tomato */
+  award(id: string, gate: number): void;
+  /** `id` threw a tomato: [x, y, z, vx, vy, vz] */
+  throw(id: string, p: number[]): void;
+  /** `id` got hit by a tomato from `by` (the victim's device decides) */
+  splat(id: string, by: string): void;
 }
 
 export class Session {
@@ -76,7 +88,9 @@ export class Session {
   private hostLink: Link | null = null; // guest: host
   private hostT: HostTransport | null = null;
   private dead = false;
-  ev: SessionEvents = { lobby() {}, start() {}, pose() {}, finish() {}, left() {}, closed() {} };
+  ev: SessionEvents = { lobby() {}, start() {}, pose() {}, finish() {}, left() {}, closed() {}, award() {}, throw() {}, splat() {} };
+  /** host: checkpoints already claimed this race (first come, first served) */
+  private claimed = new Set<number>();
 
   private constructor(
     readonly code: string,
@@ -148,7 +162,7 @@ export class Session {
         reject(new Error('closed'));
         s.close('The host left the room');
       };
-      link.send({ k: 'hello', v: PROTOCOL, name: cleanName(name), style, livery } satisfies Msg);
+      link.send({ k: 'hello', v: PROTOCOL, build: BUILD, name: cleanName(name), style, livery } satisfies Msg);
     });
   }
 
@@ -161,7 +175,7 @@ export class Session {
         if (!m || typeof m !== 'object') return; // ignore anything malformed
       if (!joined) {
         if (m.k !== 'hello') return;
-        if (m.v !== PROTOCOL) return this.reject(link, 'version');
+        if (m.v !== PROTOCOL || (m.build !== BUILD && BUILD !== 'dev' && m.build !== 'dev')) return this.reject(link, 'version');
         if (this.players.length >= MAX_PLAYERS) return this.reject(link, 'full');
         joined = true;
         this.links.set(link.id, link);
@@ -179,6 +193,14 @@ export class Session {
       } else if (m.k === 'finish') {
         this.relay({ k: 'finish', id: link.id, time: m.time }, link.id);
         this.ev.finish(link.id, m.time);
+      } else if (m.k === 'claim') {
+        this.grant(link.id, Number(m.gate));
+      } else if (m.k === 'throw') {
+        this.relay({ k: 'throw', id: link.id, p: m.p }, link.id);
+        this.ev.throw(link.id, m.p);
+      } else if (m.k === 'splat') {
+        this.relay({ k: 'splat', id: link.id, by: String(m.by) }, link.id);
+        this.ev.splat(link.id, String(m.by));
       } else if (m.k === 'car') {
         const p = this.players.find((q) => q.id === link.id);
         if (p) {
@@ -221,6 +243,7 @@ export class Session {
     if (!this.isHost) return;
     this.stageId = stageId;
     this.racing = true;
+    this.claimed.clear();
     const m: Msg = { k: 'start', stageId, players: this.players };
     this.relay(m);
     this.ev.start(stageId, this.players.slice());
@@ -251,6 +274,9 @@ export class Session {
       this.racing = true;
       this.ev.start(m.stageId, m.players);
     } else if (m.k === 'pose' && m.id) this.ev.pose(m.id, m.p);
+    else if (m.k === 'award') this.ev.award(String(m.id), Number(m.gate));
+    else if (m.k === 'throw' && m.id) this.ev.throw(m.id, m.p);
+    else if (m.k === 'splat' && m.id) this.ev.splat(m.id, String(m.by));
     else if (m.k === 'finish' && m.id) this.ev.finish(m.id, m.time);
   }
 
@@ -264,6 +290,32 @@ export class Session {
   sendFinish(time: number): void {
     if (this.isHost) this.relay({ k: 'finish', id: HOST_ID, time });
     else this.hostLink?.send({ k: 'finish', time } satisfies Msg);
+  }
+
+  /* ---------------------------- tomato fight ---------------------------- */
+
+  /** I just passed checkpoint `gate`: ask the host for the tomato */
+  claimGate(gate: number): void {
+    if (this.isHost) this.grant(HOST_ID, gate);
+    else this.hostLink?.send({ k: 'claim', gate } satisfies Msg);
+  }
+
+  private grant(id: string, gate: number): void {
+    if (!Number.isFinite(gate) || this.claimed.has(gate)) return;
+    this.claimed.add(gate);
+    this.relay({ k: 'award', id, gate });
+    this.ev.award(id, gate);
+  }
+
+  sendThrow(p: number[]): void {
+    if (this.isHost) this.relay({ k: 'throw', id: HOST_ID, p });
+    else this.hostLink?.send({ k: 'throw', p } satisfies Msg);
+  }
+
+  /** I got hit by `by` */
+  sendSplat(by: string): void {
+    if (this.isHost) this.relay({ k: 'splat', id: HOST_ID, by });
+    else this.hostLink?.send({ k: 'splat', by } satisfies Msg);
   }
 
   setCar(style: string, livery: string): void {
