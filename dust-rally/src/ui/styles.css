@@ -548,3 +548,61 @@ h2.record {
     transform: none;
   }
 }
+
+/* ---------------- garage ---------------- */
+.menu:has(.panel-garage) {
+  place-items: end center; /* keep the car visible above the panel */
+  background: linear-gradient(to bottom, rgba(10, 12, 16, 0) 40%, rgba(10, 12, 16, 0.55));
+}
+.chips {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.chip {
+  flex: 1;
+  appearance: none;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: var(--ink);
+  font: 800 15px var(--font);
+  border-radius: 10px;
+  padding: 10px 8px;
+  cursor: pointer;
+}
+.chip.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #1a1206;
+  border-color: transparent;
+}
+.panel-garage {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(18, 22, 28, 0.88);
+  padding: 16px 18px;
+}
+.panel-garage h2 {
+  margin-bottom: 6px;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 6px;
+}
+.swatch {
+  appearance: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.on {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px var(--accent);
+}
+.livery-name {
+  color: var(--accent);
+}

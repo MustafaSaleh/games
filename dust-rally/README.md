@@ -27,6 +27,13 @@ npm run preview    # serve dist/ locally
 ### PWA / offline
 The build writes `dist/sw.js` with a precache list of every built file (see `vite.config.ts` and `src/sw-template.js`). After the first load the game works offline and can be installed from the browser menu ("Add to Home Screen"). Each build changes the cache version, and old caches are deleted when the new worker activates.
 
+## Garage
+
+**Garage** in the main menu: choose a body style (Hatch, Coupe, Raid truck) and one of 10 colour liveries. The background car zooms in so you can preview it. The choice is saved, used in every mode, and purely cosmetic: all cars handle the same.
+
+- Add a livery: append `{ id, name, body, stripe, roof }` to `CAR_LIVERIES` in `src/config/cars.ts`.
+- Add a body style: add it to `CAR_STYLES` (`src/config/cars.ts`), write a builder function next to `hatch`/`coupe`/`truck` in `src/render/models.ts`, and give it wheel dimensions in `WHEELS`.
+
 ## Controls
 
 | | |

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { PropType } from '../config/biomes';
 import { mulberry32 } from '../core/rng';
+import type { CarStyle, Livery } from '../config/cars';
 
 /**
  * Procedural low-poly geometry. No external model files.
@@ -120,7 +121,9 @@ export interface CarModel {
   root: THREE.Group; // positioned/rotated by the game
   body: THREE.Group; // suspension offset / roll / pitch applied here
   wheels: THREE.Object3D[]; // FL, FR, RL, RR
+  wheelRadius: number;
   materials: THREE.Material[];
+  geometries: THREE.BufferGeometry[];
 }
 
 function colorGeo(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
@@ -138,46 +141,113 @@ function colorGeo(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
   return geo;
 }
 
-/** Low-poly rally hatchback, facing +z, ~4 m long. */
-export function buildCar(bodyHex: number, ghost = false): CarModel {
-  const stripe = 0x1d1d22;
-  const parts: THREE.BufferGeometry[] = [];
-  // lower body
-  parts.push(colorGeo(new THREE.BoxGeometry(1.8, 0.55, 3.9).translate(0, 0.55, 0), bodyHex));
-  // bonnet slope
-  const bonnet = new THREE.BoxGeometry(1.7, 0.2, 1.2).translate(0, 0.88, 1.2);
-  parts.push(colorGeo(bonnet, bodyHex));
-  // cabin
-  const cabin = new THREE.BoxGeometry(1.55, 0.55, 1.9);
-  const cp = cabin.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < cp.count; i++) {
-    if (cp.getY(i) > 0) {
-      cp.setX(i, cp.getX(i) * 0.86);
-      cp.setZ(i, cp.getZ(i) * 0.78 - 0.1);
+type Parts = THREE.BufferGeometry[];
+const box = (w: number, h: number, d: number, x: number, y: number, z: number) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+
+/** Box whose top face is narrowed/shortened (cabins). */
+function taperBox(w: number, h: number, d: number, topX: number, topZ: number, topShift: number): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const p = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    if (p.getY(i) > 0) {
+      p.setX(i, p.getX(i) * topX);
+      p.setZ(i, p.getZ(i) * topZ + topShift);
     }
   }
-  parts.push(colorGeo(cabin.translate(0, 1.1, -0.25), bodyHex));
-  // windows (dark band)
-  parts.push(colorGeo(new THREE.BoxGeometry(1.42, 0.34, 1.6).translate(0, 1.08, -0.2), 0x22262e));
-  // roof (body colour, on top of windows)
-  parts.push(colorGeo(new THREE.BoxGeometry(1.3, 0.08, 1.35).translate(0, 1.38, -0.33), bodyHex));
-  // roof stripe + bonnet stripe
-  parts.push(colorGeo(new THREE.BoxGeometry(0.35, 0.02, 1.36).translate(0, 1.43, -0.33), stripe));
-  parts.push(colorGeo(new THREE.BoxGeometry(0.35, 0.02, 1.2).translate(0, 0.99, 1.2), stripe));
-  // spoiler
-  parts.push(colorGeo(new THREE.BoxGeometry(1.6, 0.08, 0.35).translate(0, 1.35, -1.75), stripe));
-  parts.push(colorGeo(new THREE.BoxGeometry(0.1, 0.3, 0.2).translate(0.6, 1.2, -1.7), stripe));
-  parts.push(colorGeo(new THREE.BoxGeometry(0.1, 0.3, 0.2).translate(-0.6, 1.2, -1.7), stripe));
-  // bumpers
-  parts.push(colorGeo(new THREE.BoxGeometry(1.85, 0.25, 0.2).translate(0, 0.38, 1.98), stripe));
-  parts.push(colorGeo(new THREE.BoxGeometry(1.85, 0.25, 0.2).translate(0, 0.38, -1.98), stripe));
-  // head / tail lights
-  parts.push(colorGeo(new THREE.BoxGeometry(0.4, 0.16, 0.06).translate(0.6, 0.66, 1.96), 0xfff6d8));
-  parts.push(colorGeo(new THREE.BoxGeometry(0.4, 0.16, 0.06).translate(-0.6, 0.66, 1.96), 0xfff6d8));
-  parts.push(colorGeo(new THREE.BoxGeometry(0.4, 0.14, 0.06).translate(0.62, 0.7, -1.96), 0xd0202a));
-  parts.push(colorGeo(new THREE.BoxGeometry(0.4, 0.14, 0.06).translate(-0.62, 0.7, -1.96), 0xd0202a));
-  // spot lights pod on bonnet front
-  for (const x of [-0.5, -0.17, 0.17, 0.5]) parts.push(colorGeo(new THREE.CylinderGeometry(0.11, 0.11, 0.08, 6).rotateX(Math.PI / 2).translate(x, 0.98, 1.85), 0xfffbe8));
+  return g;
+}
+
+function lights(parts: Parts, front: number, rear: number, y: number, x = 0.6): void {
+  parts.push(colorGeo(box(0.4, 0.16, 0.06, x, y, front), 0xfff6d8));
+  parts.push(colorGeo(box(0.4, 0.16, 0.06, -x, y, front), 0xfff6d8));
+  parts.push(colorGeo(box(0.4, 0.14, 0.06, x + 0.02, y + 0.04, rear), 0xd0202a));
+  parts.push(colorGeo(box(0.4, 0.14, 0.06, -x - 0.02, y + 0.04, rear), 0xd0202a));
+}
+
+/** Rally hatchback (the original car). */
+function hatch(parts: Parts, L: Livery): void {
+  parts.push(colorGeo(box(1.8, 0.55, 3.9, 0, 0.55, 0), L.body));
+  parts.push(colorGeo(box(1.7, 0.2, 1.2, 0, 0.88, 1.2), L.body));
+  parts.push(colorGeo(taperBox(1.55, 0.55, 1.9, 0.86, 0.78, -0.1).translate(0, 1.1, -0.25), L.body));
+  parts.push(colorGeo(box(1.42, 0.34, 1.6, 0, 1.08, -0.2), 0x22262e));
+  parts.push(colorGeo(box(1.3, 0.08, 1.35, 0, 1.38, -0.33), L.roof));
+  parts.push(colorGeo(box(0.35, 0.02, 1.36, 0, 1.43, -0.33), L.stripe));
+  parts.push(colorGeo(box(0.35, 0.02, 1.2, 0, 0.99, 1.2), L.stripe));
+  parts.push(colorGeo(box(1.6, 0.08, 0.35, 0, 1.35, -1.75), L.stripe));
+  parts.push(colorGeo(box(0.1, 0.3, 0.2, 0.6, 1.2, -1.7), L.stripe));
+  parts.push(colorGeo(box(0.1, 0.3, 0.2, -0.6, 1.2, -1.7), L.stripe));
+  parts.push(colorGeo(box(1.85, 0.25, 0.2, 0, 0.38, 1.98), L.stripe));
+  parts.push(colorGeo(box(1.85, 0.25, 0.2, 0, 0.38, -1.98), L.stripe));
+  lights(parts, 1.96, -1.96, 0.66);
+  for (const x of [-0.5, -0.17, 0.17, 0.5])
+    parts.push(colorGeo(new THREE.CylinderGeometry(0.11, 0.11, 0.08, 6).rotateX(Math.PI / 2).translate(x, 0.98, 1.85), 0xfffbe8));
+}
+
+/** Low long-nosed coupe with a big wing. */
+function coupe(parts: Parts, L: Livery): void {
+  parts.push(colorGeo(box(1.86, 0.45, 4.2, 0, 0.5, 0), L.body));
+  // long sloped bonnet
+  parts.push(colorGeo(taperBox(1.76, 0.18, 1.7, 0.95, 0.9, 0.08).translate(0, 0.81, 1.1), L.body));
+  // low fastback cabin, set back
+  parts.push(colorGeo(taperBox(1.6, 0.48, 2.0, 0.82, 0.62, -0.2).translate(0, 0.96, -0.55), L.body));
+  parts.push(colorGeo(box(1.46, 0.28, 1.6, 0, 0.94, -0.5), 0x22262e));
+  parts.push(colorGeo(box(1.24, 0.07, 1.1, 0, 1.2, -0.68), L.roof));
+  // twin stripes over the whole car
+  for (const x of [-0.22, 0.22]) {
+    parts.push(colorGeo(box(0.16, 0.02, 1.72, x, 0.91, 1.1), L.stripe));
+    parts.push(colorGeo(box(0.16, 0.02, 1.12, x, 1.245, -0.68), L.stripe));
+  }
+  // big rear wing on two posts
+  parts.push(colorGeo(box(1.9, 0.07, 0.5, 0, 1.28, -1.85), L.stripe));
+  parts.push(colorGeo(box(0.08, 0.2, 0.5, 0.92, 1.33, -1.85), L.stripe));
+  parts.push(colorGeo(box(0.08, 0.2, 0.5, -0.92, 1.33, -1.85), L.stripe));
+  parts.push(colorGeo(box(0.1, 0.5, 0.18, 0.55, 1.0, -1.85), L.stripe));
+  parts.push(colorGeo(box(0.1, 0.5, 0.18, -0.55, 1.0, -1.85), L.stripe));
+  // splitter / bumpers / side skirts
+  parts.push(colorGeo(box(1.95, 0.12, 0.35, 0, 0.3, 2.1), L.stripe));
+  parts.push(colorGeo(box(1.9, 0.22, 0.18, 0, 0.36, -2.1), L.stripe));
+  parts.push(colorGeo(box(0.08, 0.14, 2.6, 0.95, 0.32, 0), L.stripe));
+  parts.push(colorGeo(box(0.08, 0.14, 2.6, -0.95, 0.32, 0), L.stripe));
+  lights(parts, 2.11, -2.11, 0.6, 0.62);
+}
+
+/** Tall rally-raid truck: open bed, roof rack, spare wheel. */
+function truck(parts: Parts, L: Livery): void {
+  const y0 = 0.3; // extra ride height
+  parts.push(colorGeo(box(1.95, 0.7, 4.3, 0, 0.75 + y0, 0), L.body));
+  parts.push(colorGeo(box(1.85, 0.22, 1.1, 0, 1.2 + y0, 1.55), L.body));
+  parts.push(colorGeo(taperBox(1.8, 0.7, 1.7, 0.92, 0.85, 0).translate(0, 1.45 + y0, 0.15), L.body));
+  parts.push(colorGeo(box(1.7, 0.4, 1.5, 0, 1.45 + y0, 0.15), 0x22262e));
+  parts.push(colorGeo(box(1.62, 0.08, 1.4, 0, 1.82 + y0, 0.15), L.roof));
+  // roof rack + light bar
+  parts.push(colorGeo(box(1.5, 0.08, 1.2, 0, 1.94 + y0, 0.1), 0x2a2a2e));
+  for (const x of [-0.45, -0.15, 0.15, 0.45])
+    parts.push(colorGeo(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 6).rotateX(Math.PI / 2).translate(x, 2.05 + y0, 0.72), 0xfffbe8));
+  // open bed with spare wheel
+  parts.push(colorGeo(box(1.75, 0.08, 1.6, 0, 1.12 + y0, -1.25), 0x2a2a2e));
+  parts.push(colorGeo(new THREE.CylinderGeometry(0.42, 0.42, 0.28, 8).translate(0, 1.3 + y0, -1.25), 0x18181a));
+  // side stripe + bonnet stripe
+  parts.push(colorGeo(box(0.06, 0.16, 4.1, 0.99, 0.85 + y0, 0), L.stripe));
+  parts.push(colorGeo(box(0.06, 0.16, 4.1, -0.99, 0.85 + y0, 0), L.stripe));
+  parts.push(colorGeo(box(0.5, 0.02, 1.1, 0, 1.32 + y0, 1.55), L.stripe));
+  // bull bar + rear bumper
+  parts.push(colorGeo(box(1.7, 0.4, 0.12, 0, 0.6 + y0, 2.22), 0x2a2a2e));
+  parts.push(colorGeo(box(2.0, 0.25, 0.2, 0, 0.45 + y0, -2.15), L.stripe));
+  lights(parts, 2.16, -2.16, 0.95 + y0, 0.65);
+}
+
+const WHEELS: Record<CarStyle, { r: number; w: number; x: number; z: number }> = {
+  hatch: { r: 0.36, w: 0.28, x: 0.82, z: 1.25 },
+  coupe: { r: 0.35, w: 0.32, x: 0.86, z: 1.35 },
+  truck: { r: 0.5, w: 0.36, x: 0.92, z: 1.4 },
+};
+
+/** Build a car of the given style and livery, facing +z, ~4 m long. */
+export function buildCar(style: CarStyle, livery: Livery, ghost = false): CarModel {
+  const parts: Parts = [];
+  if (style === 'coupe') coupe(parts, livery);
+  else if (style === 'truck') truck(parts, livery);
+  else hatch(parts, livery);
 
   const bodyGeo = mergeGeometries(parts, false)!;
   bodyGeo.computeVertexNormals();
@@ -189,19 +259,28 @@ export function buildCar(bodyHex: number, ghost = false): CarModel {
   root.add(body);
   body.add(new THREE.Mesh(bodyGeo, mat));
 
-  const wheelGeo = colorGeo(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 8).rotateZ(Math.PI / 2), 0x18181a);
+  const W = WHEELS[style];
+  const wheelGeo = colorGeo(new THREE.CylinderGeometry(W.r, W.r, W.w, 8).rotateZ(Math.PI / 2), 0x18181a);
   const wheelMat = ghost ? mat : new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   const wheels: THREE.Object3D[] = [];
   for (const [x, z] of [
-    [0.82, 1.25],
-    [-0.82, 1.25],
-    [0.82, -1.25],
-    [-0.82, -1.25],
+    [W.x, W.z],
+    [-W.x, W.z],
+    [W.x, -W.z],
+    [-W.x, -W.z],
   ]) {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
-    w.position.set(x, 0.36, z);
+    w.position.set(x, W.r, z);
+    w.rotation.order = 'YXZ';
     root.add(w);
     wheels.push(w);
   }
-  return { root, body, wheels, materials: ghost ? [mat] : [mat, wheelMat] };
+  const geometries = [bodyGeo, wheelGeo];
+  return { root, body, wheels, wheelRadius: W.r, materials: ghost ? [mat] : [mat, wheelMat], geometries };
+}
+
+export function disposeCar(m: CarModel): void {
+  m.root.removeFromParent();
+  for (const g of m.geometries) g.dispose();
+  for (const mat of m.materials) mat.dispose();
 }
