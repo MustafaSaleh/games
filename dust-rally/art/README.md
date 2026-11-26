@@ -1,6 +1,6 @@
 # Mody, the Dust Rally driver
 
-Mody (#08) is the game's driver character. He appears in the main menu and on the results screen.
+Mody (#08) is the game's driver character. On the home screen he sits on the nose of the player's car (the one chosen in the Garage), hops down, waves and later climbs back up; on the results screen he cheers in front of it. The same view is the Garage's 360° turntable.
 
 | File | What it is |
 |---|---|

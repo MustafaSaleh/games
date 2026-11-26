@@ -30,7 +30,7 @@ The build writes `dist/sw.js` with a precache list of every built file (see `vit
 
 ## Garage
 
-**Garage** in the main menu: choose a body style (Hatch, Coupe, Raid truck) and one of 10 colour liveries. The background car zooms in so you can preview it. The choice is saved, used in every mode, and purely cosmetic: all cars handle the same.
+**Garage** in the main menu: choose a body style (Hatch, Coupe, Raid truck) and one of 10 colour liveries. The car is shown on a turntable that slowly spins; drag it to see it from every side (360°). The choice is saved, used in every mode, and purely cosmetic: all cars handle the same.
 
 - Add a livery: append `{ id, name, body, stripe, roof }` to `CAR_LIVERIES` in `src/config/cars.ts`.
 - Add a body style: add it to `CAR_STYLES` (`src/config/cars.ts`), write a builder function next to `hatch`/`coupe`/`truck` in `src/render/models.ts`, and give it wheel dimensions in `WHEELS`.
@@ -70,11 +70,15 @@ Every player must run the same build: the online screen shows the game version, 
 
 For development, add `?net=local` to use a BroadcastChannel transport instead of PeerJS: open two tabs of the same browser, create a room in one and join it from the other.
 
+## Music
+
+The game makes its own background music with Web Audio: nothing is downloaded. Four tunes: **Sunny Garage** (menus), **Dust Devil** (desert), **Turbo Hatch** (forest) and **Night Frost** (snow). With **Track: Auto** the menu plays Sunny Garage and each stage plays its own tune; pick a track in Settings to hear it everywhere. Settings → Music has on/off and volume (separate from sound effects); there is also a 🎵 button on the home screen and in the race HUD, and the **M** key. Code: `src/core/music.ts` (each track is a short description: tempo, key, chords, drum patterns; the melody is generated from a seed).
+
 ## Controls
 
 | | |
 |---|---|
-| Keyboard | WASD / arrows; Space = handbrake; R = reset car onto the road; C = switch camera; F = throw a tomato (multiplayer); Esc / P = pause |
+| Keyboard | WASD / arrows; Space = handbrake; R = reset car onto the road; C = switch camera; M = music on/off; F = throw a tomato (multiplayer); Esc / P = pause |
 | Gamepad | Left stick steers; RT / A = gas; LT / X = brake/reverse; B / RB = handbrake; Y = reset; Back = switch camera; Start = pause |
 | Touch | Left thumb: floating joystick (or ◀ ▶ zones). Right side: GAS, BRAKE (hold to reverse), DRIFT (handbrake) |
 | Tilt | Settings → Steering → Tilt. On iOS this asks for motion permission. Calibrated level when a race starts |

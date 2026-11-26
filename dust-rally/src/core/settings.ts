@@ -17,6 +17,11 @@ export interface Settings {
   cameraRotate: boolean;
   /** race camera: high top-down view or third-person chase view */
   cameraView: 'top' | 'chase';
+  /** background music */
+  music: boolean;
+  musicVolume: number;
+  /** 'auto' = calm tune in menus, a stage-matched tune in races; or a fixed track id */
+  musicTrack: string;
   showFps: boolean;
   carStyle: string;
   carLivery: string;
@@ -34,6 +39,9 @@ const DEFAULTS: Settings = {
   timeOfDay: 'auto',
   cameraRotate: false,
   cameraView: 'top',
+  music: true,
+  musicVolume: 0.5,
+  musicTrack: 'auto',
   showFps: false,
   carStyle: 'hatch',
   carLivery: 'white',

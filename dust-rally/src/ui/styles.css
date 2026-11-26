@@ -1070,3 +1070,34 @@ kbd {
 .tbtn.tomato.empty {
   opacity: 0.35;
 }
+.icon-btn.off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.menu.with-hero.garage-mode {
+  place-items: center;
+}
+.menu.garage-mode .hero {
+  touch-action: none;
+  cursor: grab;
+}
+.menu.garage-mode .hero-tag {
+  display: none;
+}
+.hero-hint {
+  display: none;
+}
+.menu.garage-mode .hero-hint {
+  display: block;
+  position: absolute;
+  left: 50%;
+  bottom: 3%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}

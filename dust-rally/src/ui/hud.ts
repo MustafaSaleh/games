@@ -21,6 +21,7 @@ export class Hud {
   onPause: () => void = () => {};
   onReset: () => void = () => {};
   onCamera: () => void = () => {};
+  onMusic: () => void = () => {};
 
   constructor(parent: HTMLElement) {
     const r = (this.root = document.createElement('div'));
@@ -38,6 +39,7 @@ export class Hud {
         <button class="icon-btn" data-k="pause" aria-label="Pause">❚❚</button>
         <button class="icon-btn" data-k="reset" aria-label="Reset car">↺</button>
         <button class="icon-btn" data-k="cam" aria-label="Switch camera" title="Switch camera (C)">🎥</button>
+        <button class="icon-btn" data-k="music" aria-label="Music on/off" title="Music on/off (M)">🎵</button>
       </div>
       <div class="hud-msg" data-k="msg"></div>
       <div class="hud-count" data-k="count"></div>
@@ -50,6 +52,7 @@ export class Hud {
     this.el.pause.addEventListener('click', () => this.onPause());
     this.el.reset.addEventListener('click', () => this.onReset());
     this.el.cam.addEventListener('click', () => this.onCamera());
+    this.el.music.addEventListener('click', () => this.onMusic());
   }
 
   set(key: string, text: string): void {

@@ -23,6 +23,14 @@ export class GameAudio {
   private rpm = 900;
   private active = false;
 
+  /** the AudioContext once unlocked (music shares it) */
+  get context(): AudioContext | null {
+    return this.ctx;
+  }
+  get noiseBuffer(): AudioBuffer {
+    return this.noise;
+  }
+
   get unlocked(): boolean {
     return !!this.ctx && this.ctx.state === 'running';
   }
