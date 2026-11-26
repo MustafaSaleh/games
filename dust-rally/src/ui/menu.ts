@@ -7,6 +7,7 @@ import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle } from '../config/cars';
 import { load } from '../core/storage';
 import { isTouchDevice } from '../core/settings';
 import { BUILD } from '../net/session';
+import { TRACKS } from '../core/music';
 
 export interface MenuHandlers {
   startStage(def: StageDef): void;
@@ -19,6 +20,7 @@ export interface MenuHandlers {
   enableTilt(): Promise<boolean>;
   settingsChanged(s: Settings): void;
   unlockAudio(): void;
+  toggleMusic(): void;
   startSplit(def: StageDef): void;
   createRoom(name: string): void;
   joinRoom(code: string, name: string): void;
@@ -104,7 +106,7 @@ export class Menu {
     parent.appendChild(this.root);
     this.hero = document.createElement('div');
     this.hero.className = 'hero';
-    this.hero.innerHTML = `<div class="hero-bubble"></div><div class="hero-tag"><b>MODY</b><span>#08</span></div>`;
+    this.hero.innerHTML = `<div class="hero-bubble"></div><div class="hero-tag"><b>MODY</b><span>#08</span></div><div class="hero-hint">⟲ drag to spin 360°</div>`;
     this.bubble = this.hero.querySelector('.hero-bubble')!;
     this.body = document.createElement('div');
     this.body.className = 'menu-body';
@@ -144,7 +146,7 @@ export class Menu {
   }
 
   private heroScreen(): boolean {
-    return this.visible && (this.current === 'main' || this.current === 'results');
+    return this.visible && (this.current === 'main' || this.current === 'results' || this.current === 'garage');
   }
 
   private syncHero(): void {
@@ -155,9 +157,13 @@ export class Menu {
     const key = on ? this.current + ':' + (this.current === 'results' ? (this.result?.title ?? '') : '') : '';
     const changed = key !== this.heroKey;
     this.heroKey = key;
+    this.root.classList.toggle('garage-mode', on && this.current === 'garage');
     if (!c) return;
     c.setActive(on);
-    if (!on || !changed) return;
+    if (!on) return;
+    c.setCar(settings.carStyle, settings.carLivery);
+    c.setMode(this.current === 'garage' ? 'garage' : this.current === 'results' ? 'results' : 'home');
+    if (!changed || this.current === 'garage') return;
     if (!this.heroIntroDone) {
       this.heroIntroDone = true;
       c.playIntro();
@@ -238,6 +244,7 @@ export class Menu {
         <button class="btn" data-act="garage">Garage<small>${esc(getStyle(settings.carStyle).name)} · ${esc(getLivery(settings.carLivery).name)}</small></button>
         <button class="btn ghost" data-act="settings">Settings</button>
       </div>
+      <div class="btn-row"><button class="btn tiny" data-act="music">${settings.music ? '🎵 Music on' : '🔇 Music off'}</button></div>
       <div class="hint">${'ontouchstart' in window ? 'Left thumb steers · right side: gas / brake / drift' : 'WASD / arrows · Space = handbrake · R = reset · C = camera · Esc = pause · gamepad supported'}</div>`;
   }
 
@@ -392,7 +399,11 @@ export class Menu {
         <label>Show FPS ${chk('showFps')}</label>
         <div class="set-group">Sound</div>
         <label>Sound ${chk('sound')}</label>
-        <label>Volume <input type="range" min="0" max="1" step="0.05" data-set="volume" value="${s.volume}"></label>
+        <label>Sound effects volume <input type="range" min="0" max="1" step="0.05" data-set="volume" value="${s.volume}"></label>
+        <div class="set-group">Music</div>
+        <label>Music ${chk('music')}</label>
+        <label>Music volume <input type="range" min="0" max="1" step="0.05" data-set="musicVolume" value="${s.musicVolume}"></label>
+        <label>Track ${sel('musicTrack', [['auto', 'Auto (menu / stage)'], ...TRACKS.map((t) => [t.id, t.name] as [string, string])])}</label>
       </div>
       <p class="muted small" id="set-note"></p>
       <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
@@ -508,6 +519,10 @@ export class Menu {
         break;
       case 'lobby':
         this.h.toLobby();
+        break;
+      case 'music':
+        this.h.toggleMusic();
+        this.render();
         break;
       case 'copy-room': {
         const L = this.mpInfo();

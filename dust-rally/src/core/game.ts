@@ -9,6 +9,7 @@ import { BlobShadow, Headlights, Particles, Sparks, TireMarks } from '../render/
 import { makeContact, resolveCarCar, type CarBody, type CarContact } from '../physics/collisions';
 import { TOMATO, TomatoSystem, aimThrow, type TomatoHit, type TomatoTarget } from './tomatoes';
 import { splatScreen } from '../ui/splat';
+import { MusicPlayer, TRACKS, type TrackId } from './music';
 import { GateView } from '../render/gates';
 import { buildCar, disposeCar, type CarModel } from '../render/models';
 import { GHOST_LIVERY, getLivery, getStyle } from '../config/cars';
@@ -50,6 +51,7 @@ export class Game {
   readonly cam = new FollowCamera();
   readonly input = new Input();
   readonly audio = new GameAudio();
+  readonly music = new MusicPlayer();
   readonly hud: Hud;
   readonly menu: Menu;
   readonly touch: TouchControls;
@@ -152,7 +154,8 @@ export class Game {
       next: () => this.nextStage(),
       enableTilt: () => this.input.enableTilt(),
       settingsChanged: () => this.applySettings(),
-      unlockAudio: () => this.audio.unlock(),
+      unlockAudio: () => this.unlockAudio(),
+      toggleMusic: () => this.toggleMusic(),
       startSplit: (d) => this.startSplit(d),
       createRoom: (name) => this.createRoom(name),
       joinRoom: (code, name) => this.joinRoom(code, name),
@@ -164,6 +167,7 @@ export class Game {
     this.hud.onPause = () => this.pause();
     this.hud.onReset = () => this.resetCar();
     this.hud.onCamera = () => this.toggleCamera();
+    this.hud.onMusic = () => this.toggleMusic();
     this.hud.show(false);
     this.touch.show(false);
 
@@ -193,7 +197,7 @@ export class Game {
         }
       }
     });
-    const unlock = () => this.audio.unlock();
+    const unlock = () => this.unlockAudio();
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
     onSettingsChange(() => this.applySettings());
@@ -254,7 +258,37 @@ export class Game {
     this.r3.scene.add(this.carModel.root, this.ghostModel.root);
   }
 
+  /** first tap / key press: start sound, and hook the music onto the same audio context */
+  private unlockAudio(): void {
+    this.audio.unlock();
+    const ctx = this.audio.context;
+    if (ctx) {
+      this.music.attach(ctx, this.audio.noiseBuffer);
+      this.updateMusic();
+    }
+  }
+
+  /** pick the tune for what's on screen (or the player's fixed choice) and apply volume */
+  private updateMusic(): void {
+    this.music.set(settings.music, settings.musicVolume);
+    let id = settings.musicTrack as TrackId;
+    if (!TRACKS.some((t) => t.id === id)) {
+      if (this.attract || !this.world) id = 'sunny';
+      else {
+        const biome = this.stageDef?.biome ?? '';
+        id = biome === 'snow' ? 'frost' : biome === 'forest' ? 'turbo' : 'dust';
+      }
+    }
+    this.music.play(id);
+    this.hud.cls('music', 'off', !settings.music);
+  }
+
+  private toggleMusic(): void {
+    updateSettings({ music: !settings.music });
+  }
+
   private applySettings(): void {
+    this.updateMusic();
     this.applyCar();
     this.audio.applyVolume();
     this.touch.applyMode();
@@ -896,6 +930,7 @@ export class Game {
       if (inp.pressed('Escape') || inp.pressed('KeyP') || inp.padPressed(9)) this.pause();
       if (inp.pressed('KeyR') || inp.padPressed(3)) this.resetCar();
       if (inp.pressed('KeyC') || inp.padPressed(8)) this.toggleCamera();
+      if (inp.pressed('KeyM')) this.toggleMusic();
       if (this.mp !== 'off' && (inp.pressed('KeyF') || inp.padPressed(4) || inp.throwReq)) this.throwTomato(1);
       if (p2 && (p2.input.pressed('Slash') || p2.input.pressed('ControlRight') || p2.input.padPressed(4))) this.throwTomato(2);
       if (p2 && (p2.input.pressed('Enter') || p2.input.pressed('NumpadEnter') || p2.input.padPressed(3))) this.resetP2();
@@ -1172,7 +1207,7 @@ export class Game {
     this.perf.genMs = performance.now() - tg;
 
     // camera
-    const garage = this.attract && this.menu.visible && this.menu.current === 'garage';
+    const garage = false; // the garage shows the car in Mody's 360° showroom instead
     this.cam.zoomTarget = garage ? 0.32 : 1;
     this.cam.shiftTarget = garage ? 1 : 0;
     const ground = this.groundFn;
