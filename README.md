@@ -18,8 +18,6 @@ npm run preview    # serve dist/ locally
 
 `dist/` is fully static, so you can deploy it to any static host: GitHub Pages, Netlify, Cloudflare Pages, S3 or nginx. `base` is `./`, so it also works from a sub-folder.
 
-Production is [https://dustrally.darsh.im](https://dustrally.darsh.im). The `Dockerfile` builds and tests the game, then nginx serves `dist/` with `/health` for the platform monitor.
-
 - **Netlify / Cloudflare Pages**: build command `npm run build`, output directory `dist`.
 - **GitHub Pages**: push the contents of `dist/` to the `gh-pages` branch, or use the `actions/upload-pages-artifact` workflow.
 - Serve over **HTTPS**. Service workers, tilt steering (iOS) and installability all require it.
