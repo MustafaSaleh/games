@@ -16,6 +16,8 @@ export interface Settings {
   timeOfDay: 'auto' | TimeOfDay;
   cameraRotate: boolean;
   showFps: boolean;
+  carStyle: string;
+  carLivery: string;
 }
 
 const DEFAULTS: Settings = {
@@ -30,6 +32,8 @@ const DEFAULTS: Settings = {
   timeOfDay: 'auto',
   cameraRotate: false,
   showFps: false,
+  carStyle: 'hatch',
+  carLivery: 'white',
 };
 
 export const settings: Settings = { ...DEFAULTS, ...load<Partial<Settings>>('settings', {}) };
