@@ -6,7 +6,7 @@ A collection of browser games, hosted on GitHub Pages.
 
 | Game | Play | Source |
 |---|---|---|
-| Dust Rally — top-down rally: stages, endless procedural roads, daily challenge | [Play](https://mustafasaleh.github.io/games/dust-rally/) | [`dust-rally/`](dust-rally/) |
+| Dust Rally — top-down rally: stages, endless procedural roads, daily challenge, split-screen and online multiplayer | [Play](https://mustafasaleh.github.io/games/dust-rally/) | [`dust-rally/`](dust-rally/) |
 
 ## How it works
 

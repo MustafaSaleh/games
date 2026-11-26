@@ -464,6 +464,9 @@ export class Terrain {
   version = 0;
   stats = { generated: 0, lastGenMs: 0, pooled: 0 };
   private propMul = 1;
+  /** extra streaming centres (split-screen: the second player's car) */
+  extra: [number, number][] = [];
+  private centres: number[] = [];
 
   constructor(
     readonly world: World,
@@ -534,22 +537,34 @@ export class Terrain {
   update(x: number, z: number, budgetMs: number): void {
     const R = this.viewRadius;
     const unloadR = R + SIZE * 1.2;
+    // all streaming centres: the main one plus any extra (split-screen second player)
+    const centres = this.centres;
+    centres.length = 0;
+    centres.push(x, z);
+    for (const [ex, ez] of this.extra) centres.push(ex, ez);
     // unload
     for (const c of this.chunks.values()) {
-      const dx = c.x0 + SIZE / 2 - x,
-        dz = c.z0 + SIZE / 2 - z;
-      if (dx * dx + dz * dz > unloadR * unloadR) {
+      let far = true;
+      for (let i = 0; i < centres.length; i += 2) {
+        const dx = c.x0 + SIZE / 2 - centres[i],
+          dz = c.z0 + SIZE / 2 - centres[i + 1];
+        if (dx * dx + dz * dz <= unloadR * unloadR) far = false;
+      }
+      if (far) {
         if (this.active === c) this.active = null;
         if (c.ready) this.version++;
         this.release(c);
       }
     }
     // request
+    let added = false;
+    for (let ci = 0; ci < centres.length; ci += 2) {
+    const x = centres[ci],
+      z = centres[ci + 1];
     const c0x = Math.floor((x - R) / SIZE),
       c1x = Math.floor((x + R) / SIZE);
     const c0z = Math.floor((z - R) / SIZE),
       c1z = Math.floor((z + R) / SIZE);
-    let added = false;
     for (let cz = c0z; cz <= c1z; cz++)
       for (let cx = c0x; cx <= c1x; cx++) {
         const dx = cx * SIZE + SIZE / 2 - x,
@@ -560,10 +575,16 @@ export class Terrain {
         this.queue.push(this.obtain(cx, cz));
         added = true;
       }
+    }
     if (added || this.queue.length > 1) {
       // nearest first
       for (let i = this.queue.length - 1; i >= 0; i--) if (this.chunks.get(this.queue[i].key) !== this.queue[i] || this.queue[i].ready) this.queue.splice(i, 1);
-      this.queue.sort((a, b) => dist2(a, x, z) - dist2(b, x, z));
+      const near = (c: Chunk) => {
+        let m = Infinity;
+        for (let i = 0; i < centres.length; i += 2) m = Math.min(m, dist2(c, centres[i], centres[i + 1]));
+        return m;
+      };
+      this.queue.sort((a, b) => near(a) - near(b));
     }
     if (budgetMs <= 0) return;
     const t0 = performance.now();

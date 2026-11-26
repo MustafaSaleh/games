@@ -7,6 +7,7 @@ A lightweight, mobile-first, top-down rally game for the browser. Vite + TypeScr
 - **Stages**: hand-designed point-to-point tracks (JSON), with checkpoints, splits against your best, a best time and a ghost of your best run.
 - **Endless**: an infinite seeded procedural road. Biomes blend from one to the next, and difficulty rises with distance. Gates add time to a countdown. Your score is the distance driven, and the run can be replayed or shared by seed.
 - **Daily Challenge**: Endless with a seed derived from today's UTC date, so everyone gets the same road.
+- **Multiplayer**: split-screen for two players on one device, or online races for 2–4 friends in a private room.
 
 ## Run, build, deploy
 
@@ -34,6 +35,35 @@ The build writes `dist/sw.js` with a precache list of every built file (see `vit
 - Add a livery: append `{ id, name, body, stripe, roof }` to `CAR_LIVERIES` in `src/config/cars.ts`.
 - Add a body style: add it to `CAR_STYLES` (`src/config/cars.ts`), write a builder function next to `hatch`/`coupe`/`truck` in `src/render/models.ts`, and give it wheel dimensions in `WHEELS`.
 
+## Multiplayer
+
+**Multiplayer** in the main menu has two modes. Both race the hand-made stages; first across the line wins. Cars pass through each other like ghosts, so there's no crashing into friends.
+
+### Split-screen (one device)
+
+Two views side by side (stacked on a tall screen). Player 2 gets a different colour automatically.
+
+| | Player 1 | Player 2 |
+|---|---|---|
+| Keyboard | WASD, Space = drift, R = reset | Arrow keys, Right Shift = drift, Enter = reset |
+| Gamepad | first connected pad | second connected pad |
+
+When one player finishes, the other has 30 seconds to cross the line (otherwise DNF).
+
+### Online (each player on their own device)
+
+1. One player taps **Create a room** and gets a code like `TIGER-42`, plus a **Copy invite link** button (`…/dust-rally/?room=TIGER-42`).
+2. Friends type the code (or open the link) and tap **Join**. Up to 4 racers per room.
+3. The host picks the stage and taps **Start race!** Everyone starts together, sees the others' cars with name tags and a live position (1st of 3), and gets a shared results table. The host can start another race or change the stage; anyone can change their car in the room's Garage button.
+
+How it works: the game stays a static site on GitHub Pages. Browsers connect directly to each other over WebRTC using [PeerJS](https://peerjs.com/). PeerJS's free public server only introduces the players (the room code is the host's peer id), and its TURN relay helps when a direct connection isn't possible. The host relays positions (15 per second) to everyone else. Code: `src/net/transport.ts` (PeerJS and a local test transport), `src/net/session.ts` (room protocol), `src/core/racers.ts` (split-screen player 2, remote cars).
+
+Kid-safe by design: private rooms only, no public lobby, no chat, names up to 12 characters.
+
+Limitations: it depends on the public PeerJS server being up; some strict school or office networks block WebRTC; the room closes if the host leaves.
+
+For development, add `?net=local` to use a BroadcastChannel transport instead of PeerJS: open two tabs of the same browser, create a room in one and join it from the other.
+
 ## Controls
 
 | | |
@@ -50,13 +80,14 @@ Sound stays muted until your first tap or key press, because browsers block audi
 ```
 src/
   config/     all tunables: handling, surfaces, biomes/palettes, lighting, quality, game rules
-  core/       game orchestrator, fixed-step loop, input, audio, race rules, ghost, rng/noise, settings
+  core/       game orchestrator, fixed-step loop, input, audio, race rules, ghost, rng/noise, settings, racers (multiplayer cars)
+  net/        online rooms: PeerJS / local transports, room protocol
   physics/    arcade car model, circle collisions
   world/      track spline, terrain shape + carving, chunk streaming, props, stage + endless generators
   render/     renderer/lights/dynamic resolution, follow camera, procedural models, effects, gates
   ui/         menus, HUD, minimap, touch controls, CSS
   tracks/     *.json stages (every file here is picked up automatically)
-tests/        vitest: physics behaviour and track validity
+tests/        vitest: physics behaviour, track validity, online room protocol
 ```
 
 ### How it fits together
@@ -141,6 +172,8 @@ New prop *shapes* go in `render/models.ts` (`propGeometry`, `PROP_COLLIDER`, `PR
 | `&timescale=4` | run the simulation faster |
 | `&notimer` | endless: the countdown never runs out |
 | `&tod=day\|dusk\|night`, `&art=mono\|color` | temporary lighting / art-style override |
+| `?room=TIGER-42` | open the online screen with this room code filled in (invite links) |
+| `&net=local` | online mode between tabs of one browser (no internet needed) |
 
 Settings → Show FPS displays fps, the current dynamic-resolution DPR and the number of instanced props.
 

@@ -29,6 +29,7 @@ export class PropRenderer {
   private prevVisible: Chunk[] = [];
   private lastVersion = -1;
   private frustum = new THREE.Frustum();
+  private frustum2 = new THREE.Frustum();
   private projView = new THREE.Matrix4();
   instances = 0;
 
@@ -47,12 +48,16 @@ export class PropRenderer {
   }
 
   /** Per-chunk frustum culling; rebuild instance buffers only if the visible set changed. */
-  update(terrain: Terrain, camera: THREE.Camera): void {
+  update(terrain: Terrain, camera: THREE.Camera, camera2?: THREE.Camera): void {
     this.projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projView);
+    if (camera2) {
+      this.projView.multiplyMatrices(camera2.projectionMatrix, camera2.matrixWorldInverse);
+      this.frustum2.setFromProjectionMatrix(this.projView);
+    }
     const vis = this.visible;
     vis.length = 0;
-    for (const c of terrain.chunks.values()) if (c.ready && this.frustum.intersectsBox(c.box)) vis.push(c);
+    for (const c of terrain.chunks.values()) if (c.ready && (this.frustum.intersectsBox(c.box) || (camera2 && this.frustum2.intersectsBox(c.box)))) vis.push(c);
     let changed = terrain.version !== this.lastVersion || vis.length !== this.prevVisible.length;
     if (!changed) for (let i = 0; i < vis.length; i++) if (vis[i] !== this.prevVisible[i]) changed = true;
     if (!changed) return;

@@ -232,7 +232,8 @@ export class TireMarks {
     });
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false;
-    for (let w = 0; w < 2; w++) this.last.push({ x: 0, z: 0, lx: 0, lz: 0, rx: 0, rz: 0, y0: 0, y1: 0, on: false });
+    // 0,1 = player 1 rear wheels; 2,3 = split-screen player 2
+    for (let w = 0; w < 4; w++) this.last.push({ x: 0, z: 0, lx: 0, lz: 0, rx: 0, rz: 0, y0: 0, y1: 0, on: false });
   }
 
   clear(): void {
@@ -243,7 +244,7 @@ export class TireMarks {
     this.mesh.geometry.attributes.color.needsUpdate = true;
   }
 
-  /** wheel: 0 = rear-left, 1 = rear-right. alpha 0 breaks the trail. */
+  /** wheel: 0 = rear-left, 1 = rear-right (2, 3 for player 2). alpha 0 breaks the trail. */
   add(wheel: number, x: number, z: number, dirX: number, dirZ: number, alpha: number, color: RGB, ground: HeightSource): void {
     const L = this.last[wheel];
     if (alpha <= 0.01) {

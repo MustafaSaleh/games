@@ -6,6 +6,13 @@ import type { Gate } from '../world/stage';
  * (or rotated with the car when the camera rotates).
  * Stages: whole track pre-rendered once. Endless: local window around the car.
  */
+/** another car on the map (ghost, split-screen partner, online player) */
+export interface MapDot {
+  x: number;
+  z: number;
+  color: string;
+}
+
 export class Minimap {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -84,7 +91,7 @@ export class Minimap {
     return [S / 2 - (x - this.ox) * this.scale, S / 2 - (z - this.oz) * this.scale];
   }
 
-  draw(track: TrackPath, gates: Gate[], nextGate: Gate | undefined, carX: number, carZ: number, heading: number, ghost: { x: number; z: number } | null, rotate: number): void {
+  draw(track: TrackPath, gates: Gate[], nextGate: Gate | undefined, carX: number, carZ: number, heading: number, others: readonly MapDot[], rotate: number): void {
     // throttle redraws to every other frame
     if (++this.frame & 1) return;
     const g = this.ctx;
@@ -143,12 +150,15 @@ export class Minimap {
       g.arc(px, py, (gt === nextGate ? 4.5 : 2.5) * this.dpr, 0, Math.PI * 2);
       g.fill();
     }
-    if (ghost) {
-      const [px, py] = this.toMap(ghost.x, ghost.z);
-      g.fillStyle = 'rgba(140,200,255,0.8)';
+    for (const o of others) {
+      const [px, py] = this.toMap(o.x, o.z);
+      g.fillStyle = o.color;
+      g.strokeStyle = 'rgba(0,0,0,0.5)';
+      g.lineWidth = 1 * this.dpr;
       g.beginPath();
-      g.arc(px, py, 3.5 * this.dpr, 0, Math.PI * 2);
+      g.arc(px, py, 3.8 * this.dpr, 0, Math.PI * 2);
       g.fill();
+      g.stroke();
     }
     // car arrow
     const [cx, cy] = this.toMap(carX, carZ);
