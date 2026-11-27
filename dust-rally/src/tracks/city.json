@@ -1,0 +1,188 @@
+{
+  "id": "ghost-bay",
+  "name": "Ghost Bay",
+  "description": "An abandoned city by the bay. Dodge the wrecks, then cross the broken red bridge: floor it up the ramp and fly the gap!",
+  "biome": "city",
+  "timeOfDay": "dusk",
+  "seed": 5521,
+  "width": 10,
+  "checkpoints": 6,
+  "rolls": 0.6,
+  "elevation": 1,
+  "bank": 0.8,
+  "propDensity": 1,
+  "points": [
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      140
+    ],
+    [
+      60,
+      220
+    ],
+    [
+      160,
+      240
+    ],
+    [
+      260,
+      260
+    ],
+    [
+      300,
+      340
+    ],
+    [
+      300,
+      440
+    ],
+    [
+      300,
+      800
+    ],
+    [
+      300,
+      1160
+    ],
+    [
+      300,
+      1220
+    ],
+    [
+      240,
+      1290
+    ],
+    [
+      140,
+      1310
+    ],
+    [
+      60,
+      1370
+    ],
+    [
+      40,
+      1480
+    ],
+    [
+      100,
+      1580
+    ],
+    [
+      200,
+      1600
+    ]
+  ],
+  "surfaces": [
+    {
+      "from": 0,
+      "to": 1400,
+      "type": "tarmac"
+    },
+    {
+      "from": 1400,
+      "to": 1650,
+      "type": "gravel"
+    },
+    {
+      "from": 1650,
+      "to": 9999,
+      "type": "tarmac"
+    }
+  ],
+  "jumps": [
+    {
+      "at": 999,
+      "height": 4.5,
+      "length": 40
+    }
+  ],
+  "bay": {
+    "a": [
+      -300,
+      800
+    ],
+    "b": [
+      900,
+      800
+    ],
+    "width": 420,
+    "depth": 18,
+    "water": -9
+  },
+  "bridge": {
+    "from": 700,
+    "to": 1300,
+    "lift": 9,
+    "ramp": 110,
+    "towers": [
+      880,
+      1120
+    ],
+    "gap": {
+      "from": 1000,
+      "to": 1026
+    }
+  },
+  "obstacles": [
+    {
+      "at": 180,
+      "lateral": 0.45,
+      "type": "wreck"
+    },
+    {
+      "at": 330,
+      "lateral": -0.5,
+      "type": "wreck"
+    },
+    {
+      "at": 500,
+      "lateral": 0.5,
+      "type": "barrier",
+      "rot": 0.2
+    },
+    {
+      "at": 905,
+      "lateral": -0.45,
+      "type": "wreck"
+    },
+    {
+      "at": 935,
+      "lateral": 0.5,
+      "type": "wreck",
+      "rot": 0.5
+    },
+    {
+      "at": 1065,
+      "lateral": -0.5,
+      "type": "barrier",
+      "rot": 0.1
+    },
+    {
+      "at": 1150,
+      "lateral": 0.42,
+      "type": "wreck",
+      "rot": -0.3
+    },
+    {
+      "at": 1500,
+      "lateral": -0.45,
+      "type": "wreck"
+    },
+    {
+      "at": 1700,
+      "lateral": 0.45,
+      "type": "barrier",
+      "rot": -0.2
+    },
+    {
+      "at": 1850,
+      "lateral": -0.5,
+      "type": "wreck"
+    }
+  ]
+}

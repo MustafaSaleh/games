@@ -4,7 +4,7 @@
 
 A lightweight, mobile-first, top-down rally game for the browser. Vite + TypeScript + Three.js, no physics engine, no model files: every mesh is built procedurally. Production bundle: ~160 KB gzipped JS plus a few KB of CSS and icons.
 
-- **Stages**: hand-designed point-to-point tracks (JSON), with checkpoints, splits against your best, a best time and a ghost of your best run. Four stages: Forest Ridge, Dune Run, Frost Line (night) and **Redwood Pass**: giant redwoods, big climbs and snowy mountain ranges on the horizon (best in the chase camera).
+- **Stages**: hand-designed point-to-point tracks (JSON), with checkpoints, splits against your best, a best time and a ghost of your best run. Five stages: Forest Ridge, Dune Run, Frost Line (night), **Redwood Pass** (giant redwoods, big climbs, snowy mountain ranges on the horizon) and **Ghost Bay**: an abandoned city overgrown with grass, wrecked cars and barriers on the road, and a broken red suspension bridge over the bay: hit the ramp fast and fly the gap, or splash into the water and restart on the bridge.
 - **Endless**: an infinite seeded procedural road. Biomes blend from one to the next, and difficulty rises with distance. Gates add time to a countdown. Your score is the distance driven, and the run can be replayed or shared by seed.
 - **Daily Challenge**: Endless with a seed derived from today's UTC date, so everyone gets the same road.
 - **Multiplayer**: split-screen for two players on one device, or online races for 2–4 friends in a private room.
@@ -179,6 +179,8 @@ Everything is in `src/config/`:
    - optional `skyline`: rock, far-rock and snow colours for distant mountain ranges on the horizon (`render/skyline.ts`, visible in the chase camera).
 2. Add it to `BIOMES` (stages can then use it by id) and to `BIOME_LIST` if endless mode should include it in its biome rotation automatically, and stages can use it by id.
 3. Optional: add a `.card.biome-<id>` gradient in `src/ui/styles.css` for the stage card.
+
+Stages can also have a **bay** (a capsule of water the terrain drops into), a **bridge** (`from`/`to` metres along the road: the deck is raised by `lift`, stands without embankments, has `towers` and an optional broken `gap` with no road) and **obstacles** (`wreck` / `barrier` at a distance along the road and a lateral position). See `src/tracks/city.json`; the bridge look is built in `src/render/bridge.ts`. Falling below the water level splashes and puts the car back on the road before the gap (`World.safeRespawn`).
 
 New prop *shapes* go in `render/models.ts` (`propGeometry`, `PROP_COLLIDER`, `PROP_TYPES`) and `world/props.ts` (`CAPACITY`).
 

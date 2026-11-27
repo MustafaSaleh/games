@@ -540,6 +540,9 @@ h2.record {
 .card.biome-redwood {
   background: linear-gradient(160deg, #8a4a2c, #22361f 70%);
 }
+.card.biome-city {
+  background: linear-gradient(160deg, #c4452f, #3a3b40 70%);
+}
 .card.biome-savanna {
   background: linear-gradient(160deg, #9a8a3a, #4a3f1c);
 }
@@ -1367,4 +1370,7 @@ input:not([type]) {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 600;
+}
+.stage-tile.biome-city {
+  background: linear-gradient(160deg, #c4452f, #3a3b40 70%);
 }

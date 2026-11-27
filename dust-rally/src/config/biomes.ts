@@ -1,7 +1,9 @@
 import type { SurfaceId } from './surfaces';
 
 /** Props that can be scattered around. Each one is a single InstancedMesh. */
-export type PropType = 'pine' | 'round' | 'rock' | 'pebble' | 'bush' | 'shrub' | 'cactus' | 'marker' | 'redwood';
+export type PropType = 'pine' | 'round' | 'rock' | 'pebble' | 'bush' | 'shrub' | 'cactus' | 'marker' | 'redwood' | 'ruin' | 'tower' | 'wreck' | 'barrier';
+/** props that carry their own colours (the instance colour only varies brightness) */
+export const SELF_COLORED: ReadonlySet<PropType> = new Set<PropType>(['redwood', 'ruin', 'tower', 'wreck', 'barrier']);
 
 export interface PropRule {
   type: PropType;
@@ -253,7 +255,53 @@ const redwood: BiomeDef = {
   skyline: { rock: 0x4f6470, rockFar: 0x7d93a3, snow: 0xf2f6fa },
 };
 
-export const BIOMES: Record<string, BiomeDef> = { forest, desert, snow, savanna, redwood };
+/** Abandoned city: cracked streets, ruins, rusty wrecks, nature taking over. */
+const city: BiomeDef = {
+  id: 'city',
+  name: 'Ruins',
+  palette: {
+    ground: 0x6d7a52,
+    groundAlt: 0x8a8a7a,
+    groundLow: 0x5c6c45,
+    groundHigh: 0x7f8a62,
+    steep: 0x77736a,
+    surfaces: {
+      tarmac: 0x3f4145,
+      gravel: 0x8c867a,
+      dirt: 0x6c5a46,
+      sand: 0xbfae8c,
+      snow: 0xe8eef2,
+      ice: 0xbcd6e6,
+      mud: 0x4e4234,
+      grass: 0x6d7a52,
+    },
+    foliage: 0x4a6a32,
+    foliageAlt: 0x5c7c38,
+    trunk: 0x4d3b2c,
+    rock: 0x8e8c86,
+    bush: 0x5c7e34,
+    fog: 0xcdbfa8,
+  },
+  offroad: 'grass',
+  patch: 'gravel',
+  patchAmount: 0.3,
+  roadSurfaces: ['tarmac', 'gravel', 'dirt'],
+  terrain: { hillAmp: 5, midAmp: 1.2, roughAmp: 0.3, duneAmp: 0 },
+  props: [
+    { type: 'ruin', density: 0.9, cluster: 0.35, scale: [0.75, 1.35], roadGap: 9 },
+    { type: 'tower', density: 0.28, cluster: 0.5, scale: [0.8, 1.4], roadGap: 15 },
+    { type: 'wreck', density: 0.45, cluster: 0.2, scale: [0.95, 1.05], roadGap: 1.2 },
+    { type: 'round', density: 0.7, cluster: 0.5, scale: [0.8, 1.4], roadGap: 2.5 },
+    { type: 'bush', density: 3.2, cluster: 0.4, scale: [0.6, 1.3], roadGap: -0.5 },
+    // grass tufts growing through the cracked road
+    { type: 'shrub', density: 5, cluster: 0.3, scale: [0.6, 1.3], roadGap: -3.6 },
+    { type: 'rock', density: 1.1, cluster: 0.4, scale: [0.5, 1.2], roadGap: 1 },
+    { type: 'pebble', density: 4, cluster: 0, scale: [0.4, 1.0], roadGap: -2 },
+  ],
+  skyline: { rock: 0x6e6a60, rockFar: 0x9c9585, snow: 0xb2ab9b },
+};
+
+export const BIOMES: Record<string, BiomeDef> = { forest, desert, snow, savanna, redwood, city };
 export const BIOME_LIST: BiomeDef[] = [forest, desert, snow, savanna];
 
 /**

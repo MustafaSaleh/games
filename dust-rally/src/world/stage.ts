@@ -23,6 +23,16 @@ export interface StageDef {
   points: [number, number][];
   surfaces?: { from: number; to: number; type: SurfaceId }[];
   jumps?: { at: number; height: number; length?: number }[];
+  /** a bay of water (a capsule from a to b) the road crosses; seabed = water - depth */
+  bay?: { a: [number, number]; b: [number, number]; width: number; depth: number; water: number; shore?: number };
+  /**
+   * A bridge between from..to (metres along the road): the deck is raised by `lift` with
+   * ramps of `ramp` m at both ends, has no embankment beside it, towers at `towers` (m),
+   * and an optional broken section `gap` with no road at all (jump it!).
+   */
+  bridge?: { from: number; to: number; lift: number; ramp?: number; towers?: number[]; gap?: { from: number; to: number } };
+  /** fixed obstacles on the road: `lateral` -1..1 across the road */
+  obstacles?: { at: number; lateral: number; type: 'wreck' | 'barrier'; rot?: number }[];
 }
 
 export interface Gate {
@@ -96,6 +106,41 @@ export class StageWorld extends World {
     this.build();
   }
 
+  /** per track sample: 0 road, 1 bridge deck, 2 broken gap */
+  private kinds = new Uint8Array(0);
+
+  roadKind(idx: number): number {
+    return this.kinds[idx] ?? 0;
+  }
+
+  adjustBase(x: number, z: number, h: number): number {
+    const b = this.def.bay;
+    if (!b) return h;
+    // distance to the bay's centre line (segment a-b)
+    const ax = b.a[0],
+      az = b.a[1];
+    const vx = b.b[0] - ax,
+      vz = b.b[1] - az;
+    const t = clamp(((x - ax) * vx + (z - az) * vz) / (vx * vx + vz * vz), 0, 1);
+    const d = Math.hypot(x - ax - vx * t, z - az - vz * t);
+    const shore = b.shore ?? 45;
+    const inside = 1 - smoothstep(b.width / 2 - shore, b.width / 2, d);
+    if (inside <= 0) return h;
+    // gentle beach, then deep water
+    const seabed = b.water - b.depth;
+    return h + (seabed - h) * inside * inside * (3 - 2 * inside);
+  }
+
+  /** after falling off the broken bridge: back to the deck with a run-up to the ramp */
+  safeRespawn(idx: number): number {
+    const g = this.def.bridge?.gap;
+    if (!g) return idx;
+    const sp = this.track.spacing;
+    const s = idx * sp;
+    if (s > g.from - 110 && s < g.to + 4) return Math.round((g.from - 150) / sp);
+    return idx;
+  }
+
   biomeAt(_x: number, _z: number, out: BiomeMix): BiomeMix {
     out.a = this.biome;
     out.b = this.biome;
@@ -151,11 +196,21 @@ export class StageWorld extends World {
     const defaultSurf = SURFACE_INDEX[this.biome.def.roadSurfaces[0]];
     const zones = (def.surfaces ?? []).map((z) => ({ from: z.from, to: z.to, surf: SURFACE_INDEX[z.type] }));
     const jumps = def.jumps ?? [];
+    const br = def.bridge;
+    this.kinds = new Uint8Array(n);
 
     for (let i = 0; i < n; i++) {
       const s = i * sp;
       let h = baseS[i];
       let calm = 1;
+      if (br) {
+        // raised, flat deck with approach ramps
+        const ramp = br.ramp ?? 120;
+        const bw = smoothstep(br.from, br.from + ramp, s) * (1 - smoothstep(br.to - ramp, br.to, s));
+        h += br.lift * bw;
+        calm *= 1 - smoothstep(br.from - 40, br.from, s) * (1 - smoothstep(br.to, br.to + 40, s));
+        if (s >= br.from && s <= br.to) this.kinds[i] = br.gap && s >= br.gap.from && s <= br.gap.to ? 2 : 1;
+      }
       for (const j of jumps) calm *= 1 - jumpWindow(s - j.at, j.length ?? 24);
       h += calm * rolls * rollsN.noise1(s / 70) * (0.55 + 0.45 * rollsN.noise1(s / 400 + 9));
       for (const j of jumps) h += jumpProfile(s - j.at, j.height, j.length ?? 24);
@@ -164,6 +219,17 @@ export class StageWorld extends World {
       const bank = clamp(sm[i] * BANK_FACTOR * bankMul, -BANK_MAX, BANK_MAX);
       this.track.push(xs[i], zs[i], h, Math.sin(heading[i]), Math.cos(heading[i]), halfW, bank, surf);
     }
+
+    // fixed obstacles on the road
+    for (const o of def.obstacles ?? []) {
+      const i = Math.round(o.at / sp);
+      if (i < 0 || i >= n) continue;
+      const rx = -Math.cos(heading[i]),
+        rz = Math.sin(heading[i]);
+      const off = o.lateral * halfW;
+      this.obstacles.push({ x: xs[i] + rx * off, z: zs[i] + rz * off, rot: heading[i] + (o.rot ?? (((i * 7919) % 100) / 100 - 0.5) * 0.8), type: o.type });
+    }
+    if (def.bay) this.waterLevel = def.bay.water;
 
     // gates: N checkpoints evenly spaced + finish
     const cps = def.checkpoints ?? STAGE_DEFAULTS.checkpoints;

@@ -7,7 +7,7 @@ const modules = import.meta.glob<{ default: StageDef }>('./tracks/*.json', { eag
 const stages = Object.keys(modules)
   .sort()
   .map((k) => modules[k].default);
-const order = ['forest-ridge', 'dune-run', 'frost-line', 'redwood-pass'];
+const order = ['forest-ridge', 'dune-run', 'frost-line', 'redwood-pass', 'ghost-bay'];
 stages.sort((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99));
 
 // iPhone / iPad ignore user-scalable=no: block pinch-zoom and double-tap-zoom ourselves,
