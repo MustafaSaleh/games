@@ -9,6 +9,10 @@ import type { HostTransport, Link, NetDriver } from './transport';
 export const MAX_PLAYERS = 4;
 const PROTOCOL = 1;
 export const HOST_ID = 'host';
+/** the only "chat" there is: a fixed set of emojis (kid-safe, nothing to type) */
+export const EMOTES = ['👍', '👋', '😂', '😮', '🔥', '🏁', '🍅', '😎'] as const;
+/** minimum time between two emojis from one player (ms) */
+const EMOTE_GAP = 700;
 /** this build's id: a friend on a different build is turned away with a clear message */
 export const BUILD = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev';
 
@@ -35,7 +39,8 @@ type Msg =
   | { k: 'claim'; gate: number }
   | { k: 'award'; id: string; gate: number }
   | { k: 'throw'; id?: string; p: number[] }
-  | { k: 'splat'; id?: string; by: string };
+  | { k: 'splat'; id?: string; by: string }
+  | { k: 'emote'; id?: string; e: number };
 
 const WORDS = ['TIGER', 'ROCKET', 'DUST', 'TURBO', 'CACTUS', 'COMET', 'EAGLE', 'FOX', 'LIZARD', 'STORM', 'DRIFT', 'GECKO', 'FALCON', 'BISON', 'MOJAVE', 'SPARK'];
 
@@ -75,6 +80,8 @@ export interface SessionEvents {
   throw(id: string, p: number[]): void;
   /** `id` got hit by a tomato from `by` (the victim's device decides) */
   splat(id: string, by: string): void;
+  /** `id` sent emoji EMOTES[e] */
+  emote(id: string, e: number): void;
 }
 
 export class Session {
@@ -88,7 +95,8 @@ export class Session {
   private hostLink: Link | null = null; // guest: host
   private hostT: HostTransport | null = null;
   private dead = false;
-  ev: SessionEvents = { lobby() {}, start() {}, pose() {}, finish() {}, left() {}, closed() {}, award() {}, throw() {}, splat() {} };
+  ev: SessionEvents = { lobby() {}, start() {}, pose() {}, finish() {}, left() {}, closed() {}, award() {}, throw() {}, splat() {}, emote() {} };
+  private lastEmote = new Map<string, number>();
   /** host: checkpoints already claimed this race (first come, first served) */
   private claimed = new Set<number>();
 
@@ -201,6 +209,8 @@ export class Session {
       } else if (m.k === 'splat') {
         this.relay({ k: 'splat', id: link.id, by: String(m.by) }, link.id);
         this.ev.splat(link.id, String(m.by));
+      } else if (m.k === 'emote') {
+        this.relayEmote(link.id, Number(m.e));
       } else if (m.k === 'car') {
         const p = this.players.find((q) => q.id === link.id);
         if (p) {
@@ -277,6 +287,7 @@ export class Session {
     else if (m.k === 'award') this.ev.award(String(m.id), Number(m.gate));
     else if (m.k === 'throw' && m.id) this.ev.throw(m.id, m.p);
     else if (m.k === 'splat' && m.id) this.ev.splat(m.id, String(m.by));
+    else if (m.k === 'emote' && m.id) this.ev.emote(m.id, Number(m.e));
     else if (m.k === 'finish' && m.id) this.ev.finish(m.id, m.time);
   }
 
@@ -316,6 +327,31 @@ export class Session {
   sendSplat(by: string): void {
     if (this.isHost) this.relay({ k: 'splat', id: HOST_ID, by });
     else this.hostLink?.send({ k: 'splat', by } satisfies Msg);
+  }
+
+  /* -------------------------------- emojis -------------------------------- */
+
+  /** send emoji EMOTES[e]; returns false if it was too soon after the last one */
+  sendEmote(e: number): boolean {
+    const now = Date.now();
+    if (now - (this.lastEmote.get(this.myId) ?? 0) < EMOTE_GAP) return false;
+    if (this.isHost) this.relayEmote(HOST_ID, e);
+    else {
+      this.lastEmote.set(this.myId, now);
+      this.hostLink?.send({ k: 'emote', e } satisfies Msg);
+      this.ev.emote(this.myId, e);
+    }
+    return true;
+  }
+
+  /** host: pass an emoji on to everyone (valid ones only, and not too often per player) */
+  private relayEmote(id: string, e: number): void {
+    if (!Number.isInteger(e) || e < 0 || e >= EMOTES.length) return;
+    const now = Date.now();
+    if (now - (this.lastEmote.get(id) ?? 0) < EMOTE_GAP - 150) return;
+    this.lastEmote.set(id, now);
+    this.relay({ k: 'emote', id, e }, id); // the sender already shows its own
+    this.ev.emote(id, e);
   }
 
   setCar(style: string, livery: string): void {

@@ -1104,3 +1104,267 @@ kbd {
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* settings tabs */
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 12px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.tab {
+  flex: 1;
+  appearance: none;
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 6px;
+  background: transparent;
+  color: var(--ink);
+  font: 800 13px var(--font);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.7;
+}
+.tab span {
+  font-size: 18px;
+}
+.tab.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #1a1206;
+  opacity: 1;
+}
+.keys-help {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+.panel-settings .settings {
+  min-height: 210px;
+}
+
+/* no page zoom on phones/tablets: iOS zooms into any field with text under 16px and
+   never zooms back, and double-tap zoom is turned off for every control */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+button,
+select,
+input,
+.btn,
+.card {
+  touch-action: manipulation;
+}
+select,
+input[type='text'],
+input:not([type]) {
+  font-size: 16px !important;
+}
+
+/* ---------------- emojis (online) ---------------- */
+.emote-row {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  margin: 4px 0 10px;
+}
+.emote {
+  appearance: none;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 22px;
+  line-height: 1;
+  padding: 8px 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.emote:active {
+  transform: scale(0.9);
+  background: rgba(255, 181, 46, 0.35);
+}
+.emo-pop {
+  font-size: 22px;
+  animation: emo-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes emo-pop {
+  from {
+    transform: scale(0.2);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+.tag-emote {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translate(-50%, -4px);
+  font-size: 30px;
+  animation: emo-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+.float-emote {
+  position: absolute;
+  font-size: 40px;
+  transform: translate(-50%, -50%);
+  animation: emo-float 2.1s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes emo-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -30%) scale(0.3);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -60%) scale(1.15);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -190%) scale(1);
+  }
+}
+.emo-btn,
+.hud-emotes {
+  display: none;
+}
+.hud.online .emo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.hud.online.emotes-open .hud-emotes {
+  display: grid;
+  grid-template-columns: repeat(4, 46px);
+  gap: 6px;
+  position: absolute;
+  top: calc(62px + var(--sat));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--panel);
+  pointer-events: auto;
+}
+.hud-emotes .emote {
+  font-size: 26px;
+  padding: 7px 0;
+}
+
+/* ---------------- room: players, your car, stage tiles ---------------- */
+.lobby-players .who,
+.my-car .who {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+.lobby-players .who small,
+.my-car .who small {
+  font-size: 11px;
+  opacity: 0.65;
+  font-weight: 600;
+}
+.lobby-players li .emo-pop {
+  margin-left: 4px;
+}
+.my-car {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: 6px 0 8px;
+}
+.my-car .btn {
+  margin-left: auto;
+}
+.car-chip {
+  width: 44px;
+  height: 28px;
+  border-radius: 8px;
+  flex: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+.stage-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 6px 0 12px;
+}
+.stage-tile {
+  position: relative;
+  appearance: none;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 10px 10px 9px;
+  color: var(--ink);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  font: 800 14px var(--font);
+  opacity: 0.75;
+  touch-action: manipulation;
+}
+.stage-tile small {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  font-weight: 700;
+}
+.stage-tile.on {
+  border-color: var(--accent);
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgba(255, 181, 46, 0.25);
+}
+.stage-tile[disabled] {
+  cursor: default;
+}
+.stage-tile .tick {
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #1a1206;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+}
+.stage-tile.biome-forest {
+  background: linear-gradient(160deg, #3f6b33, #22361f);
+}
+.stage-tile.biome-desert {
+  background: linear-gradient(160deg, #b9773e, #5a3520);
+}
+.stage-tile.biome-snow {
+  background: linear-gradient(160deg, #50627a, #1c2433);
+}
+.stage-tile.biome-redwood {
+  background: linear-gradient(160deg, #8a4a2c, #22361f 70%);
+}
+.panel-lobby .set-group .muted {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}

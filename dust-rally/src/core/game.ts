@@ -35,7 +35,7 @@ import { dailySeed, randomSeed, seedToString, todayKey } from './rng';
 import { autoQuality, isTouchDevice, onSettingsChange, settings, updateSettings } from './settings';
 import { load, save } from './storage';
 import { LocalRacer, RemoteCar, gridSlot, liveryCss, otherLivery } from './racers';
-import { HOST_ID, Session, cleanName, normCode, type MpPlayer } from '../net/session';
+import { EMOTES, HOST_ID, Session, cleanName, normCode, type MpPlayer } from '../net/session';
 import { localDriver, peerDriver } from '../net/transport';
 import type { MapDot } from '../ui/minimap';
 import type { Standing } from '../ui/menu';
@@ -167,11 +167,13 @@ export class Game {
       hostStage: (id) => this.session?.setStage(id),
       hostStart: () => this.session?.start(),
       toLobby: () => this.toLobby(),
+      emote: (i) => this.sendEmote(i),
     });
     this.hud.onPause = () => this.pause();
     this.hud.onReset = () => this.resetCar();
     this.hud.onCamera = () => this.toggleCamera();
     this.hud.onMusic = () => this.toggleMusic();
+    this.hud.onEmote = (i) => this.sendEmote(i);
     this.hud.show(false);
     this.touch.show(false);
 
@@ -647,6 +649,36 @@ export class Game {
     }
   }
 
+  /* ---- emojis (online) ---- */
+
+  private sendEmote(i: number): void {
+    this.hud.root.classList.remove('emotes-open');
+    if (!this.session?.sendEmote(i)) this.say('Wait a moment before the next emoji', 900);
+  }
+
+  /** someone (maybe me) sent an emoji: next to their name in menus, above their car in a race */
+  private showEmote(id: string, e: number): void {
+    const text = EMOTES[e];
+    if (!text) return;
+    const until = performance.now() + 2600;
+    this.menu.emotes.set(id, { text, until });
+    const cur = this.menu.visible ? this.menu.current : '';
+    if (cur === 'lobby' || cur === 'results') {
+      this.menu.refresh();
+      setTimeout(() => this.menu.visible && this.menu.current === cur && this.menu.refresh(), 2700);
+    }
+    if (this.attract || !this.race || this.mp !== 'online') return;
+    if (id === this.session?.myId) {
+      // float it up from my own car
+      const v = new THREE.Vector3(this.car.x, this.car.y + 2.4, this.car.z).project(this.cam.camera);
+      floatEmote(this.labelLayer, ((v.x + 1) / 2) * window.innerWidth, ((1 - v.y) / 2) * window.innerHeight, text);
+      return;
+    }
+    const r = this.remotes.get(id);
+    if (r && r.visible) r.showEmote(text);
+    else this.say(`${r?.player.name ?? this.session?.players.find((p) => p.id === id)?.name ?? 'Someone'} ${text}`, 1600);
+  }
+
   /** switch between the top-down and the third-person chase camera */
   private toggleCamera(): void {
     updateSettings({ cameraView: settings.cameraView === 'chase' ? 'top' : 'chase' });
@@ -708,6 +740,7 @@ export class Game {
     const st = (time: number | null, gone: boolean) => (time != null ? fmtTime(time) : gone ? 'left' : final ? 'DNF' : 'racing…');
     const me = this.session?.me;
     rows.push({
+      id: me?.id,
       name: this.mp === 'split' ? 'P1' : (me?.name ?? 'You'),
       color: liveryCss(settings.carLivery),
       time: this.p1Finish,
@@ -718,7 +751,7 @@ export class Game {
     if (this.p2)
       rows.push({ name: 'P2', color: liveryCss(this.p2.livery.id), time: this.p2.finishTime, status: st(this.p2.finishTime, false), me: false, progress: this.p2.race.maxS });
     for (const r of this.remotes.values())
-      rows.push({ name: r.player.name, color: liveryCss(r.player.livery), time: r.finishTime, status: st(r.finishTime, r.gone), me: false, progress: r.progress });
+      rows.push({ id: r.player.id, name: r.player.name, color: liveryCss(r.player.livery), time: r.finishTime, status: st(r.finishTime, r.gone), me: false, progress: r.progress });
     rows.sort((a, b) => (a.time ?? Infinity) - (b.time ?? Infinity) || b.progress - a.progress);
     const first = rows[0];
     const place = rows.findIndex((r) => r.me) + 1;
@@ -789,6 +822,7 @@ export class Game {
     s.ev.throw = (id, p) => {
       if (this.mp === 'online' && !this.attract && this.remotes.has(id)) this.tomatoes.spawn(id, p);
     };
+    s.ev.emote = (id, e) => this.showEmote(id, e);
     s.ev.splat = (id, by) => {
       if (this.mp !== 'online' || this.attract) return;
       if (by === s.myId) this.say(`SPLAT! You hit ${nameOf(id)}! 🍅`);
@@ -830,7 +864,14 @@ export class Game {
         racing: ss.racing,
         stageId: ss.stageId,
         shareUrl: url.toString(),
-        players: ss.players.map((p) => ({ name: p.name, color: liveryCss(p.livery), me: p.id === ss.myId, host: p.id === HOST_ID })),
+        players: ss.players.map((p) => ({
+          id: p.id,
+          name: p.name,
+          color: liveryCss(p.livery),
+          car: `${getStyle(p.style).name} · ${getLivery(p.livery).name}`,
+          me: p.id === ss.myId,
+          host: p.id === HOST_ID,
+        })),
         serverOnline: ss.serverOnline,
       };
     };
@@ -938,6 +979,7 @@ export class Game {
       if (inp.pressed('KeyR') || inp.padPressed(3)) this.resetCar();
       if (inp.pressed('KeyC') || inp.padPressed(8)) this.toggleCamera();
       if (inp.pressed('KeyM')) this.toggleMusic();
+      if (this.mp === 'online') for (let i = 0; i < EMOTES.length; i++) if (inp.pressed('Digit' + (i + 1))) this.sendEmote(i);
       if (this.mp !== 'off' && (inp.pressed('KeyF') || inp.padPressed(4) || inp.throwReq)) this.throwTomato(1);
       if (p2 && (p2.input.pressed('Slash') || p2.input.pressed('ControlRight') || p2.input.padPressed(4))) this.throwTomato(2);
       if (p2 && (p2.input.pressed('Enter') || p2.input.pressed('NumpadEnter') || p2.input.padPressed(3))) this.resetP2();
@@ -1438,4 +1480,15 @@ function el(tag: string, cls: string, parent: HTMLElement): HTMLElement {
 
 function ordinal(n: number): string {
   return n + (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
+}
+
+/** an emoji that pops up at a screen position and floats away */
+function floatEmote(layer: HTMLElement, x: number, y: number, text: string): void {
+  const d = document.createElement('div');
+  d.className = 'float-emote';
+  d.textContent = text;
+  d.style.left = x + 'px';
+  d.style.top = y + 'px';
+  layer.appendChild(d);
+  setTimeout(() => d.remove(), 2200);
 }

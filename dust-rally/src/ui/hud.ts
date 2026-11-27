@@ -1,4 +1,5 @@
 import { Minimap } from './minimap';
+import { EMOTES } from '../net/session';
 
 export function fmtTime(t: number, showMs = true): string {
   if (!Number.isFinite(t)) return '--:--';
@@ -22,6 +23,7 @@ export class Hud {
   onReset: () => void = () => {};
   onCamera: () => void = () => {};
   onMusic: () => void = () => {};
+  onEmote: (i: number) => void = () => {};
 
   constructor(parent: HTMLElement) {
     const r = (this.root = document.createElement('div'));
@@ -40,6 +42,9 @@ export class Hud {
         <button class="icon-btn" data-k="reset" aria-label="Reset car">↺</button>
         <button class="icon-btn" data-k="cam" aria-label="Switch camera" title="Switch camera (C)">🎥</button>
         <button class="icon-btn" data-k="music" aria-label="Music on/off" title="Music on/off (M)">🎵</button>
+        <button class="icon-btn emo-btn" data-k="emo" aria-label="Send an emoji" title="Emoji (keys 1-8)">😀</button>
+      </div>
+      <div class="hud-emotes" data-k="emotes">${EMOTES.map((e, i) => `<button class="emote" data-i="${i}" title="${i + 1}">${e}</button>`).join('')}
       </div>
       <div class="hud-msg" data-k="msg"></div>
       <div class="hud-count" data-k="count"></div>
@@ -53,6 +58,11 @@ export class Hud {
     this.el.reset.addEventListener('click', () => this.onReset());
     this.el.cam.addEventListener('click', () => this.onCamera());
     this.el.music.addEventListener('click', () => this.onMusic());
+    this.el.emo.addEventListener('click', () => this.root.classList.toggle('emotes-open'));
+    this.el.emotes.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
+      if (b) this.onEmote(Number(b.dataset.i));
+    });
   }
 
   set(key: string, text: string): void {

@@ -60,6 +60,29 @@ describe('online session (local transport)', () => {
     expect(closed).toMatch(/host left/i);
   });
 
+  it('emojis: everyone sees them, bad ones are dropped, and spamming is limited', async () => {
+    const d = localDriver();
+    const host = await Session.create(d, 'Mody', 'hatch', 'white', 's');
+    const g = await Session.join(d, host.code, 'Sara', 'coupe', 'red');
+    await tick();
+    const seenByHost: string[] = [],
+      seenByGuest: string[] = [];
+    host.ev.emote = (id, e) => seenByHost.push(`${id}:${e}`);
+    g.ev.emote = (id, e) => seenByGuest.push(`${id}:${e}`);
+    expect(g.sendEmote(0)).toBe(true);
+    expect(g.sendEmote(1)).toBe(false); // too soon
+    expect(host.sendEmote(4)).toBe(true);
+    await tick();
+    expect(seenByHost.sort()).toEqual([`${g.myId}:0`, 'host:4'].sort());
+    expect(seenByGuest.sort()).toEqual([`${g.myId}:0`, 'host:4'].sort());
+    // a hacked client sending nonsense is ignored by the host
+    (g as unknown as { hostLink: { send(m: unknown): void } }).hostLink.send({ k: 'emote', e: 99 });
+    await tick();
+    expect(seenByHost.length).toBe(2);
+    g.leave();
+    host.leave();
+  });
+
   it('rejects when full and when the room does not exist', async () => {
     const d = localDriver();
     const host = await Session.create(d, 'A', 'hatch', 'white', 's');
