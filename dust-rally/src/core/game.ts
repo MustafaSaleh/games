@@ -11,6 +11,7 @@ import { TOMATO, TomatoSystem, aimThrow, type TomatoHit, type TomatoTarget } fro
 import { splatScreen } from '../ui/splat';
 import { MusicPlayer, TRACKS, type TrackId } from './music';
 import { Skyline } from '../render/skyline';
+import { buildBridge, buildWater } from '../render/bridge';
 import { BIOMES } from '../config/biomes';
 import { GateView } from '../render/gates';
 import { buildCar, disposeCar, setBrakeLights, type CarModel } from '../render/models';
@@ -95,6 +96,11 @@ export class Game {
   private rbuf = [0, 0, 0, 0, 0, 0];
   private sparks = new Sparks();
   private skyline = new Skyline();
+  /** bridge + water of the current stage (Ghost Bay) */
+  private bridgeMesh: THREE.Mesh | null = null;
+  private water: THREE.Mesh | null = null;
+  /** time (ms) a car fell in the water; it is put back on the road shortly after */
+  private sunk = { p1: 0, p2: 0 };
   private skyOn = false;
   /* ---- tomato fight ---- */
   private tomatoes = new TomatoSystem();
@@ -385,6 +391,16 @@ export class Game {
     this.marks.clear();
     this.particles.clear();
     this.sparks.clear();
+    for (const m of [this.bridgeMesh, this.water]) {
+      if (!m) continue;
+      this.r3.scene.remove(m);
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    this.bridgeMesh = world instanceof StageWorld ? buildBridge(world) : null;
+    this.water = Number.isFinite(world.waterLevel) ? buildWater(world.waterLevel) : null;
+    for (const m of [this.bridgeMesh, this.water]) if (m) this.r3.scene.add(m);
+    this.sunk.p1 = this.sunk.p2 = 0;
     const sky = def ? BIOMES[def.biome]?.skyline : undefined;
     this.skyOn = !!sky;
     if (sky) this.skyline.setColors(sky);
@@ -480,14 +496,14 @@ export class Game {
     const p2 = this.p2;
     if (!p2 || !this.world || !this.terrain || p2.race.state !== 'running') return;
     const tr = this.world.track;
-    const i = p2.race.respawnIndex();
+    const i = this.world.safeRespawn(p2.race.respawnIndex());
     p2.car.reset(tr.x(i), tr.z(i), Math.atan2(tr.dx(i), tr.dz(i)), this.terrain);
   }
 
   private resetCar(): void {
     if (!this.race || !this.world || !this.terrain || this.race.state !== 'running') return;
     const tr = this.world.track;
-    const i = this.race.respawnIndex();
+    const i = this.world.safeRespawn(this.race.respawnIndex());
     this.car.reset(tr.x(i), tr.z(i), Math.atan2(tr.dx(i), tr.dz(i)), this.terrain);
     this.marks.add(0, 0, 0, 0, 0, 0, this.tmpRGB, this.terrain);
     this.marks.add(1, 0, 0, 0, 0, 0, this.tmpRGB, this.terrain);
@@ -677,6 +693,33 @@ export class Game {
     const r = this.remotes.get(id);
     if (r && r.visible) r.showEmote(text);
     else this.say(`${r?.player.name ?? this.session?.players.find((p) => p.id === id)?.name ?? 'Someone'} ${text}`, 1600);
+  }
+
+  /** fell off the broken bridge into the bay: splash, then back on the deck before the ramp */
+  private checkWater(who: 1 | 2): void {
+    const w = this.world;
+    if (!w || !Number.isFinite(w.waterLevel) || this.attract) return;
+    const car = who === 1 ? this.car : this.p2?.car;
+    if (!car) return;
+    const key = who === 1 ? 'p1' : 'p2';
+    const now = performance.now();
+    if (!this.sunk[key] && car.y < w.waterLevel - 0.5) {
+      this.sunk[key] = now;
+      const blue: RGB = [0.75, 0.88, 0.95];
+      for (let i = 0; i < 40; i++) {
+        const a = Math.random() * Math.PI * 2,
+          v = 2 + Math.random() * 6;
+        this.particles.emit(car.x, w.waterLevel + 0.3, car.z, Math.cos(a) * v, 4 + Math.random() * 7, Math.sin(a) * v, blue, 1 + Math.random() * 1.2, 0.8 + Math.random() * 0.6, 0.85);
+      }
+      this.audio.splat(true);
+      this.audio.landing(12);
+      (who === 1 ? this.cam : this.p2!.cam).shake(0.6);
+      this.say(this.p2 ? `SPLASH! P${who} fell in the bay 🌊` : 'SPLASH! 🌊 Go faster on the ramp!', 2000);
+    } else if (this.sunk[key] && now - this.sunk[key] > 1300) {
+      this.sunk[key] = 0;
+      if (who === 1) this.resetCar();
+      else this.resetP2();
+    }
   }
 
   /** switch between the top-down and the third-person chase camera */
@@ -1000,8 +1043,10 @@ export class Game {
     if (running && this.mode === 'stage' && !this.attract)
       this.ghostRec.record(dt, this.car.x, this.car.y, this.car.z, this.car.heading, this.car.upX, this.car.upZ);
     this.emitFx(this.car, dt, inp.handbrake && running);
+    this.checkWater(1);
     if (p2) {
       this.stepP2(p2, dt, terrain);
+      this.checkWater(2);
       if (resolveCarCar(this.car, p2.car, true, this.contact)) this.carContact(this.contact, p2.car);
     }
     if (online) {
@@ -1280,6 +1325,7 @@ export class Game {
     const [ta, tb, tt] = this.timeOfDay(race.maxS);
     this.r3.applyLighting(ta, tb, tt, this.fog, this.cam.dist, chase ? this.r3.quality.viewRadius * 1.2 : Infinity);
     this.skyline.group.visible = chase && this.skyOn;
+    if (this.water) this.water.position.set(this.cam.camera.position.x, this.water.position.y, this.cam.camera.position.z);
     if (this.skyline.group.visible) this.skyline.update(this.cam.camera.position.x, iy, this.cam.camera.position.z, this.r3.fog.color);
     this.vignette.style.opacity = String(this.r3.light.vignette);
 
@@ -1346,7 +1392,8 @@ export class Game {
     }
   }
 
-  private groundFn = (x: number, z: number): number => this.terrain?.heightAt(x, z) ?? 0;
+  /** ground height for the camera / sparks / tomatoes: the water surface counts as ground */
+  private groundFn = (x: number, z: number): number => Math.max(this.terrain?.heightAt(x, z) ?? 0, this.world?.waterLevel ?? -Infinity);
 
   private rbufY(r: RemoteCar): number {
     return r.model.root.position.y;

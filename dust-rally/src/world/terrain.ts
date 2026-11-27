@@ -1,3 +1,4 @@
+import { SELF_COLORED } from '../config/biomes';
 import * as THREE from 'three';
 import type { PropType } from '../config/biomes';
 import { TERRAIN } from '../config/quality';
@@ -234,6 +235,13 @@ export class Chunk {
 
     yield* this.placeProps(world, propMul, mix);
     this.placeMarkers(world, allCands);
+    // fixed obstacles (wrecks / barriers on the road)
+    for (const o of world.obstacles) {
+      const lx = o.x - this.x0,
+        lz = o.z - this.z0;
+      if (lx < 0 || lx >= SIZE || lz < 0 || lz >= SIZE) continue;
+      this.addProp(o.type, o.x, o.z, lx, lz, 1, o.rot, redwoodTint(0.6, tmpRGB));
+    }
     this.buildColliderGrid();
   }
 
@@ -243,7 +251,7 @@ export class Chunk {
     const white: RGB = [1, 1, 1];
     for (let c = 0; c < cands.length; c++) {
       const i = cands[c];
-      if (i % MARKER.every !== 0) continue;
+      if (i % MARKER.every !== 0 || world.roadKind(i) !== 0) continue; // no posts on the bridge
       const x = tr.x(i),
         z = tr.z(i);
       if (x < this.x0 || x >= this.x0 + SIZE || z < this.z0 || z >= this.z0 + SIZE) continue;
@@ -294,8 +302,9 @@ export class Chunk {
           const vi = this.vertexIndex(lx, lz);
           if (this.edge[vi] < rule.roadGap) continue;
           const s = rng.range(rule.scale[0], rule.scale[1]);
-          const color =
-            rule.type === 'redwood'
+          // nothing grows under water (bays)
+          if (this.heightLocal(lx, lz) < world.waterLevel + 0.4) continue;
+          const color = SELF_COLORED.has(rule.type)
               ? redwoodTint(rng.next(), tmpRGB)
               : rule.type === 'pine' || rule.type === 'round' || rule.type === 'cactus'
               ? rng.next() < 0.5

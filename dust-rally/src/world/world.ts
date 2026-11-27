@@ -1,3 +1,4 @@
+import type { PropType } from '../config/biomes';
 import * as THREE from 'three';
 import { BIOMES, MONOCHROME_PALETTE, type BiomeDef, type BiomePalette, type TerrainParams } from '../config/biomes';
 import { SURFACES, SURFACE_INDEX, type SurfaceId } from '../config/surfaces';
@@ -174,6 +175,24 @@ export abstract class World {
   /** called every frame with the car position (endless streams the track) */
   update(_x: number, _z: number, _progressIdx: number): void {}
 
+  /* ---- special stage features (bridge over a bay); defaults = none ---- */
+  /** water surface height; -Infinity = no water in this world */
+  waterLevel = -Infinity;
+  /** 0 = normal road, 1 = bridge deck (no embankment beside it), 2 = gap (no road at all) */
+  roadKind(_idx: number): number {
+    return 0;
+  }
+  /** reshape the natural terrain (e.g. lower a bay) */
+  adjustBase(_x: number, _z: number, h: number): number {
+    return h;
+  }
+  /** where to put a car back on the road after a reset / falling in the water */
+  safeRespawn(idx: number): number {
+    return idx;
+  }
+  /** fixed obstacles on/near the road (wrecks, barriers) */
+  readonly obstacles: { x: number; z: number; rot: number; type: PropType }[] = [];
+
   blendParams(mix: BiomeMix, out: TerrainParams): TerrainParams {
     const a = mix.a.def.terrain,
       b = mix.b.def.terrain,
@@ -198,7 +217,7 @@ export abstract class World {
    */
   evalPoint(x: number, z: number, cands: number[], nc: number, mix: BiomeMix, out: PointOut): PointOut {
     const p = this.blendParams(mix, this.params);
-    const base = this.shape.height(x, z, p);
+    const base = this.adjustBase(x, z, this.shape.height(x, z, p));
     out.base = base;
     out.lf = this.shape.lastLf;
     out.h = base;
@@ -212,9 +231,11 @@ export abstract class World {
     if (nc > 0 && this.track.nearestOf(cands, nc, x, z, this.proj)) {
       const pr = this.proj;
       const edge = pr.dist - pr.halfW;
-      if (edge < TERRAIN.shoulderMax) {
+      const kind = this.roadKind(pr.idx);
+      if (edge < TERRAIN.shoulderMax && kind !== 2) {
         const diff = base - pr.h;
-        const shoulder = clamp(TERRAIN.shoulderMin + Math.abs(diff) * TERRAIN.shoulderPerMeter, TERRAIN.shoulderMin, TERRAIN.shoulderMax);
+        // a bridge deck stands on its own: the ground right beside it is the natural ground
+        const shoulder = kind === 1 ? 0.9 : clamp(TERRAIN.shoulderMin + Math.abs(diff) * TERRAIN.shoulderPerMeter, TERRAIN.shoulderMin, TERRAIN.shoulderMax);
         const w = smoothstep(0.6, shoulder, edge);
         out.h = pr.h + (base - pr.h) * w;
         out.edge = edge;

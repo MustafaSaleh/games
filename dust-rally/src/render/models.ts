@@ -113,6 +113,75 @@ export function propGeometry(type: PropType): THREE.BufferGeometry {
       tiers.forEach(([r, h, y], i) => parts.push(colorGeo(jitter(new THREE.ConeGeometry(r, h, 8, 1), 0.5, 30 + i).translate(0, y, 0).rotateY(i * 0.7), i % 2 ? leafAlt : leaf)));
       return finish(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
     }
+    case 'ruin': {
+      // a broken low-rise: shell with half an upper floor left, dark windows, moss and vines
+      const con = 0x9a948a,
+        conDark = 0x7c776d,
+        win = 0x25272b,
+        moss = 0x5a7a34;
+      const p: THREE.BufferGeometry[] = [
+        colorGeo(box(11, 6, 9, 0, 3, 0), con),
+        colorGeo(box(11, 3.4, 4.5, 0, 7.7, -2.25), conDark),
+        colorGeo(box(4.6, 2.6, 4.5, -3.2, 10.7, -2.25), con),
+        colorGeo(box(1.2, 4.2, 1.2, 4.9, 8.1, 3.9), conDark), // a lone column
+        colorGeo(box(3.2, 0.45, 2.4, 2, 6.2, 2), moss),
+        colorGeo(box(2.4, 0.4, 1.8, -2.5, 9.6, -2.4), moss),
+        colorGeo(box(0.7, 4.6, 0.16, 3.8, 2.6, 4.56), moss), // vines
+        colorGeo(box(0.6, 3.4, 0.16, -4.6, 2.2, 4.56), moss),
+        colorGeo(jitter(new THREE.IcosahedronGeometry(1.6, 0), 0.5, 41).scale(1.4, 0.5, 1).translate(-4.5, 0.3, 5.4), conDark), // rubble
+      ];
+      for (const y of [1.8, 4.5])
+        for (const x of [-3.6, -0.6, 2.4]) {
+          p.push(colorGeo(box(1.5, 1.3, 0.12, x, y, 4.53), win));
+          p.push(colorGeo(box(1.5, 1.3, 0.12, x, y, -4.53), win));
+        }
+      for (const y of [1.8, 4.5]) for (const z of [-2, 1.6]) p.push(colorGeo(box(0.12, 1.3, 1.5, 5.53, y, z), win), colorGeo(box(0.12, 1.3, 1.5, -5.53, y, z), win));
+      return finish(p);
+    }
+    case 'tower': {
+      // a tall broken office block with window bands and a jagged top
+      const con = 0x8f8b82,
+        band = 0x2b2d31;
+      const p: THREE.BufferGeometry[] = [
+        colorGeo(box(9, 24, 9, 0, 12, 0), con),
+        colorGeo(box(9, 4, 5, 0, 26, -2), con),
+        colorGeo(box(4, 3.2, 4, -2.5, 29.6, -2.5), 0x7d796f),
+        colorGeo(box(2.6, 0.4, 2.2, 2, 28.2, -1.6), 0x5a7a34),
+      ];
+      for (let y = 2.2; y < 23; y += 3) p.push(colorGeo(box(9.12, 1.1, 9.12, 0, y, 0), band));
+      for (let y = 25.2; y < 27.5; y += 3) p.push(colorGeo(box(9.12, 1.1, 5.12, 0, y, -2), band));
+      return finish(p);
+    }
+    case 'wreck': {
+      // an old rusty car shell on its rims, grass on the roof
+      const rust = 0x8a4b2b,
+        rustDark = 0x63361f;
+      const p: THREE.BufferGeometry[] = [
+        colorGeo(box(1.8, 0.7, 4.1, 0, 0.55, 0), rust),
+        colorGeo(box(1.6, 0.6, 1.9, 0, 1.18, -0.2), rustDark),
+        colorGeo(box(1.64, 0.32, 1.5, 0, 1.22, -0.2), 0x22262a), // broken glass band
+        colorGeo(box(1.7, 0.08, 1.2, 0, 0.94, 1.35), 0x9a5a35), // bonnet
+        colorGeo(box(1.2, 0.18, 1.0, 0.1, 1.55, -0.3), 0x5a7a34), // moss on the roof
+      ];
+      for (const [x, z] of [
+        [0.78, 1.3],
+        [-0.78, 1.3],
+        [0.78, -1.35],
+        [-0.78, -1.35],
+      ])
+        p.push(colorGeo(box(0.32, 0.36, 0.62, x, 0.18, z), 0x1d1d1f));
+      return finish(p.map((g) => g.rotateZ(0.05)));
+    }
+    case 'barrier': {
+      // concrete road barrier with faded orange stripes
+      const p: THREE.BufferGeometry[] = [
+        colorGeo(box(0.85, 0.22, 3, 0, 0.11, 0), 0x9a968e),
+        colorGeo(box(0.55, 0.7, 3, 0, 0.55, 0), 0xa8a49c),
+        colorGeo(box(0.57, 0.14, 0.7, 0, 0.62, 0.9), 0xd2561e),
+        colorGeo(box(0.57, 0.14, 0.7, 0, 0.62, -0.9), 0xd2561e),
+      ];
+      return finish(p);
+    }
     case 'cactus': {
       const body = new THREE.CylinderGeometry(0.24, 0.28, 2.3, 6).translate(0, 1.15, 0);
       const arm1 = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 5).translate(0, 0.4, 0).translate(0.45, 1.1, 0);
@@ -135,9 +204,13 @@ export const PROP_COLLIDER: Record<PropType, { r: number; top: number }> = {
   cactus: { r: 0.35, top: 2.3 },
   marker: { r: 0, top: 0 },
   redwood: { r: 1.35, top: 24 },
+  ruin: { r: 6.0, top: 12 },
+  tower: { r: 5.6, top: 31 },
+  wreck: { r: 1.6, top: 1.6 },
+  barrier: { r: 1.3, top: 0.9 },
 };
 
-export const PROP_TYPES: PropType[] = ['pine', 'round', 'rock', 'pebble', 'bush', 'shrub', 'cactus', 'marker', 'redwood'];
+export const PROP_TYPES: PropType[] = ['pine', 'round', 'rock', 'pebble', 'bush', 'shrub', 'cactus', 'marker', 'redwood', 'ruin', 'tower', 'wreck', 'barrier'];
 
 /** Road-edge marker spacing (track samples, 2 m each) and offset from the edge (m). */
 export const MARKER = { every: 10, offset: 1.5 };
