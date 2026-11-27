@@ -18,6 +18,7 @@ interface Body {
 export function resolveCircleColliders(b: Body, cx: number, cz: number, r: number, hits: ColliderHits): number {
   let maxImpact = 0;
   for (let i = 0; i < hits.count; i++) {
+    if (hits.loose[i]) continue; // loose rocks are pushed around (physics/rocks.ts), not solid
     if (b.y > hits.top[i] - 0.25) continue; // flying over it
     const dx = cx - hits.x[i],
       dz = cz - hits.z[i];
