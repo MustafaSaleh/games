@@ -6,7 +6,7 @@ import type { CharacterView, Gesture } from '../render/character';
 import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle } from '../config/cars';
 import { load } from '../core/storage';
 import { isTouchDevice } from '../core/settings';
-import { BUILD } from '../net/session';
+import { BUILD, EMOTES } from '../net/session';
 import { TRACKS } from '../core/music';
 
 export interface MenuHandlers {
@@ -28,10 +28,13 @@ export interface MenuHandlers {
   hostStage(stageId: string): void;
   hostStart(): void;
   toLobby(): void;
+  emote(i: number): void;
 }
 
 /** one row of the multiplayer results table */
 export interface Standing {
+  /** player id (online), for emojis */
+  id?: string;
   name: string;
   color: string;
   time: number | null;
@@ -48,7 +51,7 @@ export interface LobbyInfo {
   stageId: string;
   shareUrl: string;
   serverOnline: boolean;
-  players: { name: string; color: string; me: boolean; host: boolean }[];
+  players: { id: string; name: string; color: string; car: string; me: boolean; host: boolean }[];
 }
 
 export interface StageInfo {
@@ -95,6 +98,8 @@ export class Menu {
   netError = '';
   netBusy = '';
   mpInfo: () => LobbyInfo | null = () => null;
+  /** recent emojis per player id (lobby / results) */
+  readonly emotes = new Map<string, { text: string; until: number }>();
   private heroKey = '';
 
   constructor(
@@ -312,30 +317,55 @@ export class Menu {
       <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
   }
 
+  /** a recent emoji from a player (shown next to their name), or '' */
+  private emoteOf(id: string): string {
+    const e = this.emotes.get(id);
+    return e && e.until > performance.now() ? e.text : '';
+  }
+
+  private emoteRow(): string {
+    return `<div class="emote-row" aria-label="Send an emoji">${EMOTES.map((e, i) => `<button class="emote" data-act="emote" data-i="${i}" aria-label="Send ${e}">${e}</button>`).join('')}</div>`;
+  }
+
   private lobbyHtml(): string {
     const L = this.mpInfo();
     if (!L) return `<h2>Room closed</h2><div class="btn-row"><button class="btn ghost" data-act="quit">Menu</button></div>`;
     const rows = [];
     for (let i = 0; i < 4; i++) {
       const p = L.players[i];
+      const emo = p ? this.emoteOf(p.id) : '';
       rows.push(
         p
-          ? `<li class="${p.me ? 'me' : ''}"><i style="background:${p.color}"></i><b>${esc(p.name)}</b>${p.me ? '<span class="tag">you</span>' : ''}${p.host ? '<span class="tag host">host</span>' : ''}</li>`
+          ? `<li class="${p.me ? 'me' : ''}"><i style="background:${p.color}"></i><span class="who"><b>${esc(p.name)}</b><small>${esc(p.car)}</small></span>${emo ? `<span class="emo-pop">${emo}</span>` : ''}${p.me ? '<span class="tag">you</span>' : ''}${p.host ? '<span class="tag host">host</span>' : ''}</li>`
           : `<li class="empty"><i></i>waiting for a friend…</li>`,
       );
     }
-    const stage = this.stages.find((s) => s.def.id === L.stageId)?.def;
-    const stageSel = L.isHost
-      ? `<label class="field">Stage<select data-host-stage>${this.stages.map((s) => `<option value="${esc(s.def.id)}" ${s.def.id === L.stageId ? 'selected' : ''}>${esc(s.def.name)}</option>`).join('')}</select></label>`
-      : `<p class="muted">Stage: <b>${esc(stage?.name ?? '—')}</b></p>`;
+    const st = getStyle(settings.carStyle);
+    const lv = getLivery(settings.carLivery);
+    const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
+    const myCar = `<div class="my-car">
+        <i class="car-chip" style="background:linear-gradient(135deg, ${hex(lv.body)} 0 60%, ${hex(lv.stripe)} 60% 76%, ${hex(lv.body)} 76%)"></i>
+        <span class="who"><b>${esc(st.name)}</b><small>${esc(lv.name)}</small></span>
+        <button class="btn tiny" data-act="garage">Change</button>
+      </div>`;
+    const tiles = this.stages
+      .map((s) => {
+        const on = s.def.id === L.stageId;
+        return `<button class="stage-tile biome-${esc(s.def.biome)} ${on ? 'on' : ''}" ${L.isHost ? `data-act="pick-stage" data-id="${esc(s.def.id)}"` : 'disabled'}>
+          <b>${esc(s.def.name)}</b><small>${esc(s.def.biome)} · ${esc(s.def.timeOfDay)}</small>${on ? '<span class="tick">✓</span>' : ''}</button>`;
+      })
+      .join('');
     return `<h2>Room</h2>
       <div class="room-code">${esc(L.code)}</div>
       <p class="muted small center">Tell your friends this code, or send them the link. · v ${esc(BUILD)}</p>
       ${L.isHost ? `<p class="host-note">${L.serverOnline ? '📱 Keep this game open on screen until everyone has joined. If you switch apps, friends can\'t connect.' : '⏳ Reconnecting to the room server… friends can join again in a moment.'}</p>` : ''}
       <div class="btn-row"><button class="btn tiny" data-act="copy-room">Copy invite link</button></div>
       <ul class="lobby-players">${rows.join('')}</ul>
-      <div class="btn-row"><button class="btn tiny" data-act="garage">Change car / colour</button></div>
-      ${stageSel}
+      ${this.emoteRow()}
+      <div class="set-group">Your car</div>
+      ${myCar}
+      <div class="set-group">Stage ${L.isHost ? '<span class="muted">· tap to choose</span>' : '<span class="muted">· the host chooses</span>'}</div>
+      <div class="stage-tiles">${tiles}</div>
       <div class="btn-col">
         ${
           L.isHost
@@ -358,32 +388,60 @@ export class Menu {
       </div>`;
   }
 
+  /** Settings is split into tabs so it fits on one screen */
+  private settingsTab: 'controls' | 'graphics' | 'audio' = 'controls';
+
   private settingsHtml(): string {
     const s = settings;
     const sel = (key: keyof Settings, opts: [string, string][]) =>
       `<select data-set="${key}">${opts.map(([v, l]) => `<option value="${v}" ${String(s[key]) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const chk = (key: keyof Settings) => `<input type="checkbox" data-set="${key}" ${s[key] ? 'checked' : ''}>`;
-    return `<h2>Settings</h2>
-      <div class="settings">
-        <div class="set-group">Controls</div>
+    const range = (key: keyof Settings, min: number, max: number, step: number) =>
+      `<input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${s[key]}">`;
+    const tab = this.settingsTab;
+    const tabs = (
+      [
+        ['controls', '🎮', 'Controls'],
+        ['graphics', '🖥️', 'Graphics'],
+        ['audio', '🎵', 'Sound & Music'],
+      ] as const
+    )
+      .map(([id, icon, label]) => `<button class="tab ${tab === id ? 'on' : ''}" data-act="set-tab" data-tab="${id}" role="tab" aria-selected="${tab === id}"><span>${icon}</span>${label}</button>`)
+      .join('');
+    let body = '';
+    if (tab === 'controls') {
+      const touch = isTouchDevice();
+      body = `
         <label>Steering ${sel('steer', [
           ['joystick', 'Joystick'],
           ['buttons', '◀ ▶ zones'],
           ['tilt', 'Tilt'],
         ])}</label>
-        <label>Tilt sensitivity <input type="range" min="0.5" max="2" step="0.1" data-set="tiltSensitivity" value="${s.tiltSensitivity}"></label>
+        ${s.steer === 'tilt' ? `<label>Tilt sensitivity ${range('tiltSensitivity', 0.5, 2, 0.1)}</label>` : ''}
         <label>Auto-accelerate ${chk('autoGas')}</label>
-        <label>Haptics ${chk('haptics')}</label>
-        <div class="set-group">Graphics</div>
+        <label>Haptics (vibration) ${chk('haptics')}</label>
+        ${
+          touch
+            ? ''
+            : `<div class="keys-help">
+          <div><kbd>W A S D</kbd> / arrows drive</div><div><kbd>Space</kbd> handbrake</div>
+          <div><kbd>R</kbd> reset car</div><div><kbd>C</kbd> camera</div>
+          <div><kbd>M</kbd> music</div><div><kbd>F</kbd> throw 🍅</div>
+          <div><kbd>1</kbd>–<kbd>8</kbd> emoji (online)</div><div><kbd>Esc</kbd> pause</div>
+        </div>`
+        }`;
+    } else if (tab === 'graphics') {
+      body = `
+        <label>Camera ${sel('cameraView', [
+          ['top', 'Top-down'],
+          ['chase', 'Chase (3rd person)'],
+        ])}</label>
+        ${s.cameraView === 'top' ? `<label>Camera turns with the car ${chk('cameraRotate')}</label>` : ''}
         <label>Quality ${sel('quality', [
           ['auto', 'Auto'],
           ['low', 'Low'],
           ['medium', 'Medium'],
           ['high', 'High'],
-        ])}</label>
-        <label>Art style ${sel('artStyle', [
-          ['color', 'Color'],
-          ['mono', 'Monochrome'],
         ])}</label>
         <label>Time of day ${sel('timeOfDay', [
           ['auto', 'Track default'],
@@ -391,20 +449,24 @@ export class Menu {
           ['dusk', 'Dusk'],
           ['night', 'Night'],
         ])}</label>
-        <label>Camera ${sel('cameraView', [
-          ['top', 'Top-down'],
-          ['chase', 'Chase (3rd person)'],
+        <label>Art style ${sel('artStyle', [
+          ['color', 'Color'],
+          ['mono', 'Monochrome'],
         ])}</label>
-        <label>Top-down camera follows rotation ${chk('cameraRotate')}</label>
-        <label>Show FPS ${chk('showFps')}</label>
-        <div class="set-group">Sound</div>
+        <label>Show FPS ${chk('showFps')}</label>`;
+    } else {
+      body = `
+        <div class="set-group">Sound effects</div>
         <label>Sound ${chk('sound')}</label>
-        <label>Sound effects volume <input type="range" min="0" max="1" step="0.05" data-set="volume" value="${s.volume}"></label>
+        <label>Volume ${range('volume', 0, 1, 0.05)}</label>
         <div class="set-group">Music</div>
         <label>Music ${chk('music')}</label>
-        <label>Music volume <input type="range" min="0" max="1" step="0.05" data-set="musicVolume" value="${s.musicVolume}"></label>
-        <label>Track ${sel('musicTrack', [['auto', 'Auto (menu / stage)'], ...TRACKS.map((t) => [t.id, t.name] as [string, string])])}</label>
-      </div>
+        <label>Volume ${range('musicVolume', 0, 1, 0.05)}</label>
+        <label>Track ${sel('musicTrack', [['auto', 'Auto (menu / stage)'], ...TRACKS.map((t) => [t.id, t.name] as [string, string])])}</label>`;
+    }
+    return `<h2>Settings</h2>
+      <div class="tabs" role="tablist">${tabs}</div>
+      <div class="settings">${body}</div>
       <p class="muted small" id="set-note"></p>
       <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
   }
@@ -447,12 +509,13 @@ export class Menu {
       const rows = r.standings
         .map(
           (s, i) =>
-            `<li class="${s.me ? 'me' : ''}"><span class="place">${s.time != null ? i + 1 : '–'}</span><i style="background:${s.color}"></i><b>${esc(s.name)}</b><span class="st">${esc(s.status)}</span></li>`,
+            `<li class="${s.me ? 'me' : ''}"><span class="place">${s.time != null ? i + 1 : '–'}</span><i style="background:${s.color}"></i><b>${esc(s.name)}</b>${s.id && this.emoteOf(s.id) ? `<span class="emo-pop">${this.emoteOf(s.id)}</span>` : ''}<span class="st">${esc(s.status)}</span></li>`,
         )
         .join('');
       return `<h2 class="${r.record ? 'record' : ''}">${esc(r.title)}</h2>
         ${r.lines.map((l) => `<div class="result-line">${esc(l)}</div>`).join('')}
         <ol class="standings">${rows}</ol>
+        ${r.online ? this.emoteRow() : ''}
         <div class="btn-col">
           ${
             r.waiting
@@ -522,6 +585,16 @@ export class Menu {
         break;
       case 'music':
         this.h.toggleMusic();
+        this.render();
+        break;
+      case 'emote':
+        this.h.emote(Number(t.dataset.i));
+        break;
+      case 'pick-stage':
+        this.h.hostStage(t.dataset.id!);
+        break;
+      case 'set-tab':
+        this.settingsTab = t.dataset.tab as typeof this.settingsTab;
         this.render();
         break;
       case 'copy-room': {
@@ -602,6 +675,7 @@ export class Menu {
       });
     }
     if ((key === 'quality' || key === 'artStyle') && note) note.textContent = 'Graphics changes apply when the next race starts.';
+    if ((key === 'steer' || key === 'cameraView') && e.type === 'change') setTimeout(() => this.current === 'settings' && this.render(), 0);
     this.h.settingsChanged(settings);
   }
 }

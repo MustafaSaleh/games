@@ -62,7 +62,11 @@ When one player finishes, the other has 30 seconds to cross the line (otherwise 
 
 How it works: the game stays a static site on GitHub Pages. Browsers connect directly to each other over WebRTC using [PeerJS](https://peerjs.com/). PeerJS's free public server only introduces the players (the room code is the host's peer id), and its TURN relay helps when a direct connection isn't possible. The host relays positions (15 per second) to everyone else. Code: `src/net/transport.ts` (PeerJS and a local test transport), `src/net/session.ts` (room protocol), `src/core/racers.ts` (split-screen player 2, remote cars).
 
-Kid-safe by design: private rooms only, no public lobby, no chat, names up to 12 characters.
+**Emojis**: instead of chat, players can send one of eight fixed emojis (👍 👋 😂 😮 🔥 🏁 🍅 😎): in the room, from the 😀 button or keys 1–8 during a race (they pop up above the sender's car), and on the results screen. The host passes them on and limits how often each player can send one.
+
+**Room screen**: players with their car, a "Your car" card (Change opens the Garage), and stage tiles the host taps to choose.
+
+Kid-safe by design: private rooms only, no public lobby, no typed chat (emojis only), names up to 12 characters.
 
 Limitations: it depends on the public PeerJS server being up; some strict school or office networks block WebRTC; the room closes if the host leaves.
 
@@ -84,6 +88,10 @@ The game makes its own background music with Web Audio: nothing is downloaded. F
 | Tilt | Settings → Steering → Tilt. On iOS this asks for motion permission. Calibrated level when a race starts |
 
 **Camera**: the classic high top-down view, or a third-person **chase** view behind the car. Switch with C, the gamepad Back button, the 🎥 button in the race HUD, or Settings → Camera (the choice is saved). In chase view the terrain streams further ahead and the fog is pulled in so the edge of the world stays hidden. Tuning: `CHASE` in `src/render/camera.ts`.
+
+**Settings** are grouped in three tabs: Controls (with a keyboard shortcut list), Graphics (camera, quality, time of day, art style) and Sound & Music.
+
+**Phones and tablets**: page zoom is blocked (pinch, double tap, and iOS's automatic zoom into small text fields), because iOS ignores `user-scalable=no`.
 
 Sound stays muted until your first tap or key press, because browsers block audio autoplay. Haptics use `navigator.vibrate` where it is supported (Android).
 

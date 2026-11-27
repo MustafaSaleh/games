@@ -99,6 +99,7 @@ export class RemoteCar {
     this.label = document.createElement('div');
     this.label.className = 'name-tag';
     this.label.textContent = player.name;
+    this.label.style.position = 'absolute';
     this.label.style.setProperty('--c', liveryCss(player.livery));
     labelLayer.appendChild(this.label);
   }
@@ -158,6 +159,17 @@ export class RemoteCar {
     out.vz = this.vz;
     out.yawRate = 0;
     return true;
+  }
+
+  /** an emoji bubble on the name tag for a couple of seconds */
+  showEmote(text: string): void {
+    const old = this.label.querySelector('.tag-emote');
+    old?.remove();
+    const e = document.createElement('span');
+    e.className = 'tag-emote';
+    e.textContent = text;
+    this.label.appendChild(e);
+    setTimeout(() => e.remove(), 2600);
   }
 
   /** place the HTML name tag over the car */

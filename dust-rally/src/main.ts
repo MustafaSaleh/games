@@ -10,6 +10,29 @@ const stages = Object.keys(modules)
 const order = ['forest-ridge', 'dune-run', 'frost-line', 'redwood-pass'];
 stages.sort((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99));
 
+// iPhone / iPad ignore user-scalable=no: block pinch-zoom and double-tap-zoom ourselves,
+// otherwise a quick double tap zooms the page and there is no easy way back.
+document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener(
+  'touchend',
+  (e) => {
+    const now = performance.now();
+    const t = e.target as HTMLElement | null;
+    if (now - lastTouchEnd < 350 && !t?.closest('input, select, textarea')) e.preventDefault();
+    lastTouchEnd = now;
+  },
+  { passive: false },
+);
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    if (e.touches.length > 1) e.preventDefault(); // pinch
+  },
+  { passive: false },
+);
+
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 
