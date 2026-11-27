@@ -537,6 +537,9 @@ h2.record {
 .card.biome-snow {
   background: linear-gradient(160deg, #50627a, #1c2433);
 }
+.card.biome-redwood {
+  background: linear-gradient(160deg, #8a4a2c, #22361f 70%);
+}
 .card.biome-savanna {
   background: linear-gradient(160deg, #9a8a3a, #4a3f1c);
 }

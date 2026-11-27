@@ -4,7 +4,7 @@
 
 A lightweight, mobile-first, top-down rally game for the browser. Vite + TypeScript + Three.js, no physics engine, no model files: every mesh is built procedurally. Production bundle: ~160 KB gzipped JS plus a few KB of CSS and icons.
 
-- **Stages**: hand-designed point-to-point tracks (JSON), with checkpoints, splits against your best, a best time and a ghost of your best run.
+- **Stages**: hand-designed point-to-point tracks (JSON), with checkpoints, splits against your best, a best time and a ghost of your best run. Four stages: Forest Ridge, Dune Run, Frost Line (night) and **Redwood Pass**: giant redwoods, big climbs and snowy mountain ranges on the horizon (best in the chase camera).
 - **Endless**: an infinite seeded procedural road. Biomes blend from one to the next, and difficulty rises with distance. Gates add time to a countdown. Your score is the distance driven, and the run can be replayed or shared by seed.
 - **Daily Challenge**: Endless with a seed derived from today's UTC date, so everyone gets the same road.
 - **Multiplayer**: split-screen for two players on one device, or online races for 2–4 friends in a private room.
@@ -167,8 +167,9 @@ Everything is in `src/config/`:
    - `offroad`, `patch` and `patchAmount`: the off-road surface and the patches mixed into it.
    - `roadSurfaces`: endless-mode surfaces, easy to hard.
    - `terrain`: hill, mid, rough and dune amplitudes.
-   - `props`: rules from the existing prop types `pine`, `round`, `rock`, `pebble`, `bush`, `shrub`, `cactus`.
-2. Add it to `BIOMES` and `BIOME_LIST`. Endless mode then includes it in its biome rotation automatically, and stages can use it by id.
+   - `props`: rules from the existing prop types `pine`, `round`, `rock`, `pebble`, `bush`, `shrub`, `cactus`, `redwood` (giant tree with its own bark/leaf colours).
+   - optional `skyline`: rock, far-rock and snow colours for distant mountain ranges on the horizon (`render/skyline.ts`, visible in the chase camera).
+2. Add it to `BIOMES` (stages can then use it by id) and to `BIOME_LIST` if endless mode should include it in its biome rotation automatically, and stages can use it by id.
 3. Optional: add a `.card.biome-<id>` gradient in `src/ui/styles.css` for the stage card.
 
 New prop *shapes* go in `render/models.ts` (`propGeometry`, `PROP_COLLIDER`, `PROP_TYPES`) and `world/props.ts` (`CAPACITY`).

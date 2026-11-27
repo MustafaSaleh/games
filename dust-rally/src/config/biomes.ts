@@ -1,7 +1,7 @@
 import type { SurfaceId } from './surfaces';
 
 /** Props that can be scattered around. Each one is a single InstancedMesh. */
-export type PropType = 'pine' | 'round' | 'rock' | 'pebble' | 'bush' | 'shrub' | 'cactus' | 'marker';
+export type PropType = 'pine' | 'round' | 'rock' | 'pebble' | 'bush' | 'shrub' | 'cactus' | 'marker' | 'redwood';
 
 export interface PropRule {
   type: PropType;
@@ -49,6 +49,8 @@ export interface BiomeDef {
   roadSurfaces: SurfaceId[];
   terrain: TerrainParams;
   props: PropRule[];
+  /** distant mountain ranges on the horizon (seen from the chase camera) */
+  skyline?: { rock: number; rockFar: number; snow: number };
 }
 
 const forest: BiomeDef = {
@@ -209,7 +211,49 @@ const savanna: BiomeDef = {
   ],
 };
 
-export const BIOMES: Record<string, BiomeDef> = { forest, desert, snow, savanna };
+/** Giant redwood forest in the mountains (Pacific Northwest / Sierra feel). */
+const redwood: BiomeDef = {
+  id: 'redwood',
+  name: 'Redwoods',
+  palette: {
+    ground: 0x557a3a,
+    groundAlt: 0x4a6e33,
+    groundLow: 0x3f602d,
+    groundHigh: 0x6a8b45,
+    steep: 0x6e5a40,
+    surfaces: {
+      tarmac: 0x4a4a4e,
+      gravel: 0x8f8068,
+      dirt: 0x7c5a3c,
+      sand: 0xc2a878,
+      snow: 0xe8eef2,
+      ice: 0xbcd6e6,
+      mud: 0x50402e,
+      grass: 0x557a3a,
+    },
+    foliage: 0x22422a,
+    foliageAlt: 0x2b4e2e,
+    trunk: 0x7a3f26,
+    rock: 0x707478,
+    bush: 0x3f6e30,
+    fog: 0xb4c8c4,
+  },
+  offroad: 'grass',
+  patch: 'dirt',
+  patchAmount: 0.12,
+  roadSurfaces: ['gravel', 'dirt', 'mud'],
+  terrain: { hillAmp: 26, midAmp: 5.5, roughAmp: 0.6, duneAmp: 0 },
+  props: [
+    { type: 'redwood', density: 1.5, cluster: 0.45, scale: [0.75, 1.25], roadGap: 7 },
+    { type: 'pine', density: 4, cluster: 0.5, scale: [0.9, 1.6], roadGap: 2.5 },
+    { type: 'bush', density: 3.2, cluster: 0.35, scale: [0.6, 1.3], roadGap: 1 },
+    { type: 'rock', density: 0.9, cluster: 0.3, scale: [0.7, 1.6], roadGap: 2 },
+    { type: 'pebble', density: 3, cluster: 0, scale: [0.4, 0.9], roadGap: 0.5 },
+  ],
+  skyline: { rock: 0x4f6470, rockFar: 0x7d93a3, snow: 0xf2f6fa },
+};
+
+export const BIOMES: Record<string, BiomeDef> = { forest, desert, snow, savanna, redwood };
 export const BIOME_LIST: BiomeDef[] = [forest, desert, snow, savanna];
 
 /**

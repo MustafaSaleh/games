@@ -84,6 +84,7 @@ export class RemoteCar {
   heading = 0;
   vx = 0;
   vz = 0;
+  braking = false;
   visible = false;
   private v = new THREE.Vector3();
 
@@ -107,6 +108,7 @@ export class RemoteCar {
     this.samples.push({ at: performance.now(), p });
     if (this.samples.length > 30) this.samples.shift();
     this.progress = p[7];
+    this.braking = p[9] === 1;
   }
 
   /** returns [x,y,z,heading,upX,upZ] at render time, or null when there is nothing yet */

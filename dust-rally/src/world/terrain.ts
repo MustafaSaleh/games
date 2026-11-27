@@ -295,7 +295,9 @@ export class Chunk {
           if (this.edge[vi] < rule.roadGap) continue;
           const s = rng.range(rule.scale[0], rule.scale[1]);
           const color =
-            rule.type === 'pine' || rule.type === 'round' || rule.type === 'cactus'
+            rule.type === 'redwood'
+              ? redwoodTint(rng.next(), tmpRGB)
+              : rule.type === 'pine' || rule.type === 'round' || rule.type === 'cactus'
               ? rng.next() < 0.5
                 ? pal.foliage
                 : pal.foliageAlt
@@ -693,4 +695,13 @@ function dist2(c: Chunk, x: number, z: number): number {
   const dx = c.x0 + SIZE / 2 - x,
     dz = c.z0 + SIZE / 2 - z;
   return dx * dx + dz * dz;
+}
+
+/** redwoods carry their own bark / leaf colours; the instance colour only varies brightness a little */
+function redwoodTint(r: number, out: RGB): RGB {
+  const v = 0.82 + r * 0.22;
+  out[0] = v;
+  out[1] = v;
+  out[2] = v;
+  return out;
 }

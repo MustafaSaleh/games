@@ -1,0 +1,26 @@
+{
+  "id": "redwood-pass",
+  "name": "Redwood Pass",
+  "description": "Giant redwoods and snowy peaks. Big climbs, a fast valley and a jump over the creek. Try the chase camera!",
+  "biome": "redwood",
+  "timeOfDay": "day",
+  "seed": 4417,
+  "width": 9,
+  "checkpoints": 6,
+  "rolls": 1.4,
+  "elevation": 1.15,
+  "bank": 1.1,
+  "propDensity": 1,
+  "points": [[0,0],[0,110],[-40,200],[-20,300],[60,370],[150,380],[220,450],[230,560],[170,650],[80,690],[10,770],[20,880],[100,950],[200,960],[290,1020],[310,1130],[250,1220],[150,1250],[80,1330],[90,1440],[170,1510],[260,1530],[320,1610],[300,1720],[220,1790]],
+  "surfaces": [
+    { "from": 0, "to": 600, "type": "gravel" },
+    { "from": 600, "to": 900, "type": "dirt" },
+    { "from": 900, "to": 1050, "type": "mud" },
+    { "from": 1050, "to": 1600, "type": "gravel" },
+    { "from": 1600, "to": 1800, "type": "dirt" },
+    { "from": 1800, "to": 9999, "type": "gravel" }
+  ],
+  "jumps": [
+    { "at": 1020, "height": 2.4, "length": 24 }
+  ]
+}

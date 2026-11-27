@@ -10,8 +10,10 @@ import { makeContact, resolveCarCar, type CarBody, type CarContact } from '../ph
 import { TOMATO, TomatoSystem, aimThrow, type TomatoHit, type TomatoTarget } from './tomatoes';
 import { splatScreen } from '../ui/splat';
 import { MusicPlayer, TRACKS, type TrackId } from './music';
+import { Skyline } from '../render/skyline';
+import { BIOMES } from '../config/biomes';
 import { GateView } from '../render/gates';
-import { buildCar, disposeCar, type CarModel } from '../render/models';
+import { buildCar, disposeCar, setBrakeLights, type CarModel } from '../render/models';
 import { GHOST_LIVERY, getLivery, getStyle } from '../config/cars';
 import { Renderer3D } from '../render/renderer';
 import { Hud, fmtDelta, fmtTime } from '../ui/hud';
@@ -92,6 +94,8 @@ export class Game {
   private mpShown = false;
   private rbuf = [0, 0, 0, 0, 0, 0];
   private sparks = new Sparks();
+  private skyline = new Skyline();
+  private skyOn = false;
   /* ---- tomato fight ---- */
   private tomatoes = new TomatoSystem();
   private ammo = 0;
@@ -134,7 +138,7 @@ export class Game {
     this.carModel = buildCar(getStyle(settings.carStyle).id, getLivery(settings.carLivery));
     this.ghostModel = buildCar(getStyle(settings.carStyle).id, GHOST_LIVERY, true);
     const sc = this.r3.scene;
-    sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group, this.sparks.group, this.tomatoes.group);
+    sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group, this.sparks.group, this.tomatoes.group, this.skyline.group);
     this.ghostModel.root.visible = false;
 
     this.vignette = el('div', 'vignette', uiRoot);
@@ -276,7 +280,7 @@ export class Game {
       if (this.attract || !this.world) id = 'sunny';
       else {
         const biome = this.stageDef?.biome ?? '';
-        id = biome === 'snow' ? 'frost' : biome === 'forest' ? 'turbo' : 'dust';
+        id = biome === 'snow' ? 'frost' : biome === 'forest' || biome === 'redwood' ? 'turbo' : 'dust';
       }
     }
     this.music.play(id);
@@ -379,6 +383,9 @@ export class Game {
     this.marks.clear();
     this.particles.clear();
     this.sparks.clear();
+    const sky = def ? BIOMES[def.biome]?.skyline : undefined;
+    this.skyOn = !!sky;
+    if (sky) this.skyline.setColors(sky);
     this.tomatoes.clear();
     this.splatLayer.replaceChildren();
     this.ammo = 0;
@@ -654,7 +661,7 @@ export class Game {
     this.poseAcc = 0;
     const c = this.car;
     const r = (v: number) => Math.round(v * 100) / 100;
-    s.sendPose([r(race.time), r(c.x), r(c.y), r(c.z), r(c.heading), r(c.upX), r(c.upZ), r(race.maxS), r(c.speed)]);
+    s.sendPose([r(race.time), r(c.x), r(c.y), r(c.z), r(c.heading), r(c.upX), r(c.upZ), r(race.maxS), r(c.speed), c.braking ? 1 : 0]);
   }
 
   /** player 1 crossed the finish line in a multiplayer race */
@@ -1180,7 +1187,10 @@ export class Game {
       const b = this.rbuf;
       r.visible = !r.gone && r.sample(now, b);
       r.model.root.visible = r.visible;
-      if (r.visible) this.poseCar(r.model, b[0], b[1], b[2], b[3], b[4], Math.sqrt(Math.max(0.01, 1 - b[4] * b[4] - b[5] * b[5])), b[5]);
+      if (r.visible) {
+        this.poseCar(r.model, b[0], b[1], b[2], b[3], b[4], Math.sqrt(Math.max(0.01, 1 - b[4] * b[4] - b[5] * b[5])), b[5]);
+        setBrakeLights(r.model, r.braking ? 1 : 0);
+      }
     }
 
     // ghost
@@ -1227,6 +1237,8 @@ export class Game {
     mixRGB(m.a.pal.fog, m.b.pal.fog, m.t, this.fog);
     const [ta, tb, tt] = this.timeOfDay(race.maxS);
     this.r3.applyLighting(ta, tb, tt, this.fog, this.cam.dist, chase ? this.r3.quality.viewRadius * 1.2 : Infinity);
+    this.skyline.group.visible = chase && this.skyOn;
+    if (this.skyline.group.visible) this.skyline.update(this.cam.camera.position.x, iy, this.cam.camera.position.z, this.r3.fog.color);
     this.vignette.style.opacity = String(this.r3.light.vignette);
 
     // effects
@@ -1279,6 +1291,7 @@ export class Game {
       iz = lerp(car.pz, car.z, alpha);
     const ih = lerpAngle(car.pHeading, car.heading, alpha);
     this.poseCar(model, ix, iy + car.suspOffset * 0.3, iz, ih, car.upX, car.upY, car.upZ);
+    setBrakeLights(model, car.braking ? 1 : 0);
     const body = model.body;
     body.position.y = car.suspOffset * 0.5;
     body.rotation.set(-car.pitch, 0, -car.roll);
