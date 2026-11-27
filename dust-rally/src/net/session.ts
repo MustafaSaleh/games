@@ -20,7 +20,7 @@ export interface MpPlayer {
   slot: number;
 }
 
-/** pose sample: [raceTime, x, y, z, heading, upX, upZ, progressS, speed] */
+/** pose sample: [raceTime, x, y, z, heading, upX, upZ, progressS, speed, braking 0/1] */
 export type PoseArr = number[];
 
 type Msg =

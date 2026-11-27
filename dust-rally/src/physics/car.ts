@@ -46,6 +46,8 @@ export class Car {
   surface = 0;
   throttle = 0;
   steerAngle = 0;
+  /** brake / reverse / handbrake pressed this step (brake lights) */
+  braking = false;
   edge = 1e9; // distance from road edge (<0 on road)
   readonly ground: GroundSample = makeGroundSample();
   // smoothed up vector for visuals
@@ -97,6 +99,7 @@ export class Car {
     this.surface = g.surface;
     this.edge = g.edge;
     this.throttle = inp.throttle;
+    this.braking = inp.brake > 0.05 || inp.handbrake;
 
     let fx = Math.sin(this.heading),
       fz = Math.cos(this.heading);

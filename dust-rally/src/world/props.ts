@@ -12,6 +12,7 @@ const CAPACITY: Record<PropType, number> = {
   shrub: 4000,
   cactus: 1500,
   marker: 1500,
+  redwood: 1200,
 };
 
 /**

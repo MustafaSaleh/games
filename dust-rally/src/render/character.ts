@@ -222,13 +222,14 @@ export class CharacterView {
     this.car = buildCar(getStyle(style).id, getLivery(livery));
     // the game's cars are chunky; a bit smaller here so Mody (a kid) looks right next to it
     this.car.root.scale.setScalar(CAR_SCALE);
-    this.carGroup.add(this.car.root);
+    // measure in the car's own frame, BEFORE it goes onto the (possibly spinning) turntable
     this.car.root.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(this.car.root);
     this.carLen = box.max.z - box.min.z;
     // find the bonnet: scan down from above along the nose; the seat is the highest surface
     // in the front part, and its front edge is where that height starts
     const ray = new THREE.Raycaster();
+    ray.camera = this.camera; // sprites (brake-light glows) need a camera to be raycast
     const heights: [number, number][] = [];
     for (let z = box.max.z; z > box.max.z - this.carLen * 0.4; z -= 0.05) {
       ray.set(new THREE.Vector3(0, 10, z), new THREE.Vector3(0, -1, 0));
@@ -246,6 +247,7 @@ export class CharacterView {
     }
     this.seatY = edge ? edge[1] : 0.7;
     this.seatEdgeZ = edge ? edge[0] - 0.04 : box.max.z - 0.4;
+    this.carGroup.add(this.car.root);
     this.carShadow.scale.set((box.max.x - box.min.x) * 1.4, (this.carLen * 1.05) / 0.6, 1);
     this.layout();
   }

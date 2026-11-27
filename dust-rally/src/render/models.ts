@@ -86,6 +86,33 @@ export function propGeometry(type: PropType): THREE.BufferGeometry {
       const top = new THREE.BoxGeometry(0.32, 0.45, 0.32).translate(0, 1.6, 0);
       return finish([colorGeo(pole, 0xe8e8e8), colorGeo(top, 0xff7a1a)]);
     }
+    case 'redwood': {
+      // giant redwood: thick flared red-brown trunk, bare lower half, narrow dark crown high up
+      const bark = 0x8a4a2c,
+        barkDark = 0x6a3420,
+        leaf = 0x2a4a2c,
+        leafAlt = 0x335a33;
+      const parts: THREE.BufferGeometry[] = [
+        colorGeo(new THREE.CylinderGeometry(1.0, 1.7, 2.2, 9).translate(0, 1.1, 0), barkDark), // root flare
+        colorGeo(jitter(new THREE.CylinderGeometry(0.55, 1.0, 13, 9, 3), 0.12, 21).translate(0, 8.7, 0), bark),
+        colorGeo(new THREE.CylinderGeometry(0.25, 0.55, 6, 7).translate(0, 18, 0), barkDark),
+      ];
+      // a few stubby branches below the crown
+      for (let i = 0; i < 4; i++) {
+        const a = i * 1.7 + 0.4;
+        parts.push(colorGeo(new THREE.CylinderGeometry(0.08, 0.16, 2.2, 4).rotateZ(1.2).translate(0.9, 12.5 + i * 0.9, 0).rotateY(a), barkDark));
+      }
+      // crown: stacked, jittered cones (narrow, dense, high)
+      const tiers: [number, number, number][] = [
+        [3.0, 4.2, 14.8],
+        [2.6, 4.0, 17.2],
+        [2.1, 3.6, 19.4],
+        [1.5, 3.2, 21.4],
+        [0.9, 2.6, 23.2],
+      ];
+      tiers.forEach(([r, h, y], i) => parts.push(colorGeo(jitter(new THREE.ConeGeometry(r, h, 8, 1), 0.5, 30 + i).translate(0, y, 0).rotateY(i * 0.7), i % 2 ? leafAlt : leaf)));
+      return finish(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
+    }
     case 'cactus': {
       const body = new THREE.CylinderGeometry(0.24, 0.28, 2.3, 6).translate(0, 1.15, 0);
       const arm1 = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 5).translate(0, 0.4, 0).translate(0.45, 1.1, 0);
@@ -107,9 +134,10 @@ export const PROP_COLLIDER: Record<PropType, { r: number; top: number }> = {
   shrub: { r: 0, top: 0 },
   cactus: { r: 0.35, top: 2.3 },
   marker: { r: 0, top: 0 },
+  redwood: { r: 1.35, top: 24 },
 };
 
-export const PROP_TYPES: PropType[] = ['pine', 'round', 'rock', 'pebble', 'bush', 'shrub', 'cactus', 'marker'];
+export const PROP_TYPES: PropType[] = ['pine', 'round', 'rock', 'pebble', 'bush', 'shrub', 'cactus', 'marker', 'redwood'];
 
 /** Road-edge marker spacing (track samples, 2 m each) and offset from the edge (m). */
 export const MARKER = { every: 10, offset: 1.5 };
@@ -124,7 +152,39 @@ export interface CarModel {
   wheelRadius: number;
   materials: THREE.Material[];
   geometries: THREE.BufferGeometry[];
+  /** brake lamps (null on ghosts): use setBrakeLights() */
+  brake: { mat: THREE.MeshBasicMaterial; glows: THREE.Sprite[]; on: number } | null;
 }
+
+/** 0 = off (dim tail lights), 1 = full brake lights */
+export function setBrakeLights(m: CarModel, amount: number): void {
+  const b = m.brake;
+  if (!b) return;
+  const a = Math.max(0, Math.min(1, amount));
+  if (Math.abs(a - b.on) < 0.01) return;
+  b.on = a;
+  b.mat.color.setRGB(0.35 + 0.65 * a, 0.03 + 0.12 * a, 0.03 + 0.08 * a);
+  for (const g of b.glows) g.material.opacity = a;
+}
+
+let glowTex: THREE.CanvasTexture | null = null;
+function brakeGlowTexture(): THREE.CanvasTexture {
+  if (glowTex) return glowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,90,70,1)');
+  grd.addColorStop(0.25, 'rgba(255,30,20,0.75)');
+  grd.addColorStop(1, 'rgba(255,0,0,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  glowTex = new THREE.CanvasTexture(c);
+  return glowTex;
+}
+
+/** rear lamp centres of the car being built (filled by lights()) */
+const rearLamps: [number, number, number][] = [];
 
 function colorGeo(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
   const c = new THREE.Color(hex);
@@ -162,6 +222,7 @@ function lights(parts: Parts, front: number, rear: number, y: number, x = 0.6): 
   parts.push(colorGeo(box(0.4, 0.16, 0.06, -x, y, front), 0xfff6d8));
   parts.push(colorGeo(box(0.4, 0.14, 0.06, x + 0.02, y + 0.04, rear), 0xd0202a));
   parts.push(colorGeo(box(0.4, 0.14, 0.06, -x - 0.02, y + 0.04, rear), 0xd0202a));
+  rearLamps.push([x + 0.02, y + 0.04, rear], [-x - 0.02, y + 0.04, rear]);
 }
 
 /** Rally hatchback (the original car). */
@@ -245,6 +306,7 @@ const WHEELS: Record<CarStyle, { r: number; w: number; x: number; z: number }> =
 /** Build a car of the given style and livery, facing +z, ~4 m long. */
 export function buildCar(style: CarStyle, livery: Livery, ghost = false): CarModel {
   const parts: Parts = [];
+  rearLamps.length = 0;
   if (style === 'coupe') coupe(parts, livery);
   else if (style === 'truck') truck(parts, livery);
   else hatch(parts, livery);
@@ -276,7 +338,31 @@ export function buildCar(style: CarStyle, livery: Livery, ghost = false): CarMod
     wheels.push(w);
   }
   const geometries = [bodyGeo, wheelGeo];
-  return { root, body, wheels, wheelRadius: W.r, materials: ghost ? [mat] : [mat, wheelMat], geometries };
+  const materials: THREE.Material[] = ghost ? [mat] : [mat, wheelMat];
+  let brake: CarModel['brake'] = null;
+  if (!ghost) {
+    // brake lamps: slightly behind the tail lights, unlit (dim) until braking, plus a glow sprite
+    const lampMat = new THREE.MeshBasicMaterial({ color: 0x5a0808 });
+    const lampGeo = new THREE.BoxGeometry(0.42, 0.16, 0.04);
+    const glowMat = new THREE.SpriteMaterial({ map: brakeGlowTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+    const glows: THREE.Sprite[] = [];
+    for (const [x, y, z] of rearLamps) {
+      const lamp = new THREE.Mesh(lampGeo, lampMat);
+      lamp.position.set(x, y, z - 0.035);
+      body.add(lamp);
+      const glow = new THREE.Sprite(glowMat);
+      glow.position.set(x, y, z - 0.25);
+      glow.scale.setScalar(1.6);
+      glow.renderOrder = 6;
+      body.add(glow);
+      glows.push(glow);
+    }
+    geometries.push(lampGeo);
+    materials.push(lampMat, glowMat);
+    brake = { mat: lampMat, glows, on: -1 };
+    setBrakeLights({ brake } as CarModel, 0);
+  }
+  return { root, body, wheels, wheelRadius: W.r, materials, geometries, brake };
 }
 
 export function disposeCar(m: CarModel): void {
