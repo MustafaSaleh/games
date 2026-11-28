@@ -65,8 +65,8 @@ Each phase ends with something playable and deployed.
 
 - [x] **0. Shared engine:** npm workspace at the repo root, `@engine` alias, CI builds every game; Dust Rally unchanged.
 - [x] **1. First playable:** tank in the desert arena (drive, aim, shoot), drones that fight back, explosions, health, waves, score, title screen with Mody.
-- [ ] **2. Mech + Garage:** walking robot suit with jump-jets and dash (procedural walk like Mody's animations), Mody climbs in, unit garage with stats and liveries.
-- [ ] **3. Enemies + bosses:** robot walkers, aliens, power-ups, first Giant Robot boss with breakable weak points.
+- [x] **2. Mech + Garage:** walking robot suit (strafes, jump-jets you can hold to hover, dash, stomp on landing, arm cannon), Mody in the glass cockpit, tank turbo-ram, Garage with stat bars and 5 colour schemes.
+- [x] **3. Enemies + bosses:** robot walkers (laser bursts, red-visor warning), jelly aliens (zig-zag hops, zap on touch), power-ups (repair, shield, rapid fire, triple shot), the Giant Robot every 5th wave (knees, then the shielded chest core; plasma volleys; stomp shockwaves to jump over).
 - [ ] **4. Co-op multiplayer:** online rooms (up to 4, host runs enemies) and split-screen co-op.
 - [ ] **5. PvP + alliances:** arena knockouts/respawn, teams 2 v 2 with enemy waves between, scoreboard, emojis, watching after you're out.
 - [ ] **6. Cities:** Cairo, Riyadh, Dubai arena maps (landmark-inspired, never damaged).
@@ -104,10 +104,12 @@ npm test -w dust-titans
 npm run build -w dust-titans
 ```
 
-## Controls (phase 1)
+## Controls
+
+Movement is screen-relative: push up and you go up the screen. The tank turns its hull and drives; the robot suit walks straight there.
 
 | | |
 |---|---|
-| Keyboard + mouse | W/S drive, A/D turn the hull, mouse aims the turret, click or Space fires, C camera, M music, Esc pause |
-| Gamepad | Left stick drive, right stick aim, RT fire |
-| Touch | Left thumb: drive joystick. Right thumb: aim joystick (fires while pushed) |
+| Keyboard + mouse | WASD / arrows move, mouse aims, click / F fires, Space jump-jets (hold to hover), Shift dash (robot) / turbo ram (tank), C camera, M music, Esc pause |
+| Gamepad | Left stick move, right stick aim, RT / RB fire, A jump, B / LB dash, Back camera |
+| Touch | Left thumb: move joystick. Right thumb: aim joystick (fires while pushed). JUMP / DASH (TURBO on the tank) buttons |

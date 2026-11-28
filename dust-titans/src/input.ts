@@ -1,16 +1,20 @@
 import * as THREE from 'three';
 import { clamp } from '@engine/core/math';
-import type { UnitInput } from './units/tank';
+import type { UnitInput, UnitKind } from './units/unit';
 
 /**
  * Twin-stick controls for every device. Movement is screen-relative (push up = go up the
  * screen) and is turned into a world direction using the camera's yaw.
- *  - keyboard + mouse: WASD / arrows move, the mouse aims, click or Space fires
- *  - gamepad: left stick move, right stick aim, RT / A fires
- *  - touch: left thumb = move joystick, right thumb = aim joystick (fires while pushed)
+ *  - keyboard + mouse: WASD / arrows move, the mouse aims, click / F fires,
+ *    Space jumps (mech), Shift dashes (mech) / turbo (tank)
+ *  - gamepad: left stick move, right stick aim, RT / RB fire, A jump, B / LB dash
+ *  - touch: left thumb = move joystick, right thumb = aim joystick (fires while pushed),
+ *    JUMP / DASH buttons
  */
 export class TitansInput {
-  readonly unit: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false };
+  readonly unit: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false, jump: false, dash: false };
+  /** on-screen buttons (touch) */
+  readonly buttons = { jump: false, dash: false };
   /** world point the player aims at (for the ground marker), or null */
   readonly aimPoint = new THREE.Vector3();
   aimVisible = false;
@@ -30,7 +34,7 @@ export class TitansInput {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       if (!this.keys.has(e.code)) this.edge.add(e.code);
       this.keys.add(e.code);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Enter'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => {
@@ -70,7 +74,9 @@ export class TitansInput {
     // screen-space move: x = right, y = up
     let sx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let sy = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    let fire = k.has('Space') || this.mouse.down;
+    let fire = k.has('KeyF') || k.has('KeyJ') || k.has('Enter') || this.mouse.down;
+    let jump = k.has('Space') || this.buttons.jump;
+    let dash = k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyK') || this.buttons.dash;
     let aimSX = 0,
       aimSY = 0,
       stickAim = false;
@@ -91,7 +97,9 @@ export class TitansInput {
         stickAim = true;
         this.mouse.active = false;
       }
-      fire = fire || (p.buttons[7]?.value ?? 0) > 0.3 || !!p.buttons[0]?.pressed;
+      fire = fire || (p.buttons[7]?.value ?? 0) > 0.3 || !!p.buttons[5]?.pressed;
+      jump = jump || !!p.buttons[0]?.pressed;
+      dash = dash || !!p.buttons[1]?.pressed || !!p.buttons[4]?.pressed;
       for (let b = 0; b < p.buttons.length; b++) {
         const now = !!p.buttons[b]?.pressed;
         this.padEdge[b] = now && !this.padPrev[b];
@@ -141,9 +149,11 @@ export class TitansInput {
       }
     } else if (mag > 0.1) u.aimYaw = Math.atan2(mx, mz); // no aim device: shoot where you drive
     u.fire = fire && this.enabled;
+    u.jump = jump && this.enabled;
+    u.dash = dash && this.enabled;
     if (!this.enabled) {
       u.move = 0;
-      u.fire = false;
+      u.fire = u.jump = u.dash = false;
     }
   }
 }
@@ -152,10 +162,29 @@ export class TitansInput {
 export class TouchSticks {
   readonly root: HTMLDivElement;
 
+  private btn: Record<'jump' | 'dash', HTMLButtonElement>;
+
   constructor(parent: HTMLElement, input: TitansInput) {
     const root = (this.root = document.createElement('div'));
     root.className = 'tt-touch';
     parent.appendChild(root);
+    const mk = (k: 'jump' | 'dash', label: string) => {
+      const b = document.createElement('button');
+      b.className = `tt-btn ${k}`;
+      b.textContent = label;
+      const set = (on: boolean) => (e: PointerEvent) => {
+        input.buttons[k] = on;
+        b.classList.toggle('on', on);
+        e.preventDefault();
+        e.stopPropagation();
+      };
+      b.addEventListener('pointerdown', set(true));
+      b.addEventListener('pointerup', set(false));
+      b.addEventListener('pointercancel', set(false));
+      b.addEventListener('pointerleave', set(false));
+      return b;
+    };
+    this.btn = { jump: mk('jump', 'JUMP'), dash: mk('dash', 'DASH') };
     for (const side of ['move', 'aim'] as const) {
       const zone = document.createElement('div');
       zone.className = `tt-zone ${side}`;
@@ -210,6 +239,13 @@ export class TouchSticks {
       zone.addEventListener('pointerup', end);
       zone.addEventListener('pointercancel', end);
     }
+    root.append(this.btn.jump, this.btn.dash);
+  }
+
+  /** tank: TURBO only · mech: JUMP + DASH */
+  setUnit(kind: UnitKind): void {
+    this.btn.jump.style.display = kind === 'mech' ? '' : 'none';
+    this.btn.dash.textContent = kind === 'mech' ? 'DASH' : 'TURBO';
   }
 
   show(on: boolean): void {

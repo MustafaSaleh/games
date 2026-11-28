@@ -1,5 +1,21 @@
 import type { CharacterView } from '@engine/render/character';
 import { settings, updateSettings, isTouchDevice } from '@engine/core/settings';
+import { load, save } from '@engine/core/storage';
+import { MECH_SPEC } from './units/mech';
+import { TANK_SPEC } from './units/tank';
+import { LIVERIES, liveryById, type UnitKind, type UnitSpec } from './units/unit';
+
+export interface Loadout {
+  unit: UnitKind;
+  livery: string;
+}
+
+export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC };
+
+export function loadLoadout(): Loadout {
+  const l = load<Partial<Loadout>>('titans.loadout', {});
+  return { unit: l.unit === 'mech' ? 'mech' : 'tank', livery: liveryById(l.livery ?? '').id };
+}
 
 /** Battle HUD: health, cannon reload, wave + score, buttons, banners, damage flash. */
 export class BattleHud {
@@ -18,7 +34,10 @@ export class BattleHud {
         <div class="tt-hp-label">ARMOUR</div>
         <div class="tt-bar"><b data-k="hp"></b></div>
         <div class="tt-bar small"><b data-k="reload"></b></div>
+        <div class="tt-bar small energy"><b data-k="energy"></b></div>
+        <div class="tt-powers" data-k="powers"></div>
       </div>
+      <div class="tt-boss" data-k="boss" hidden><span data-k="bossName">GIANT ROBOT</span><div class="tt-bar"><b data-k="bossHp"></b></div></div>
       <div class="tt-wave"><div data-k="wave">WAVE 1</div><small data-k="score">0</small></div>
       <div class="tt-buttons">
         <button class="icon-btn" data-k="pause" aria-label="Pause">❚❚</button>
@@ -40,12 +59,18 @@ export class BattleHud {
     this.el[key].textContent = text;
   }
 
-  bar(key: 'hp' | 'reload', frac: number): void {
+  bar(key: 'hp' | 'reload' | 'energy' | 'bossHp', frac: number): void {
     const w = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
     if (this.cache[key] === w) return;
     this.cache[key] = w;
     this.el[key].style.width = w;
     if (key === 'hp') this.el.hp.classList.toggle('low', frac < 0.3);
+  }
+
+  boss(on: boolean): void {
+    if (this.cache.bossOn === String(on)) return;
+    this.cache.bossOn = String(on);
+    this.el.boss.hidden = !on;
   }
 
   hurt(): void {
@@ -62,6 +87,7 @@ export class BattleHud {
 
 export interface MenuHandlers {
   play(): void;
+  loadoutChanged(l: Loadout): void;
   resume(): void;
   quit(): void;
   unlock(): void;
@@ -76,6 +102,7 @@ export class TitansMenu {
   private character: CharacterView | null = null;
   current = '';
   result = { wave: 1, score: 0, best: 0, record: false };
+  loadout: Loadout = loadLoadout();
 
   constructor(
     parent: HTMLElement,
@@ -119,6 +146,7 @@ export class TitansMenu {
 
   private syncHero(): void {
     const on = this.visible && (this.current === 'main' || this.current === 'over');
+    this.root.classList.toggle('tt-garage-open', this.visible && this.current === 'garage');
     this.root.classList.toggle('with-hero', on);
     this.character?.setActive(on);
     if (on && this.current === 'over') this.character?.play(this.result.record ? 'cheer' : 'wave');
@@ -131,12 +159,13 @@ export class TitansMenu {
       html = `<div class="logo"><span>DUST</span> TITANS</div>
         <div class="tagline">Tanks & robot suits · defend the arena · co-op and battles</div>
         <div class="btn-col">
-          <button class="btn primary" data-act="play">▶ Play: Desert Bowl<small>Survive the drone waves</small></button>
+          <button class="btn primary" data-act="play">▶ Play: Desert Bowl<small>Survive the waves · Giant Robot every 5th wave</small></button>
+          <button class="btn" data-act="garage">🛠️ Garage<small>${SPECS[this.loadout.unit].name} · ${liveryById(this.loadout.livery).name}</small></button>
           <button class="btn" data-act="how">How to play</button>
           <button class="btn ghost" data-act="settings">Settings</button>
           <a class="btn ghost" href="../dust-rally/">🏁 Dust Rally</a>
         </div>
-        <div class="hint">Phase 1 preview · more units, enemies, cities and multiplayer coming</div>`;
+        <div class="hint">Preview · cities and multiplayer coming</div>`;
     } else if (s === 'how') {
       const touch = isTouchDevice();
       html = `<h2>How to play</h2>
@@ -144,10 +173,11 @@ export class TitansMenu {
           ${
             touch
               ? `<div>👈 Left thumb: drive</div><div>👉 Right thumb: aim + fire</div>`
-              : `<div><kbd>W A S D</kbd> drive</div><div>🖱️ Mouse aims</div><div>Click / <kbd>Space</kbd> fire</div><div><kbd>C</kbd> camera · <kbd>M</kbd> music</div><div>🎮 Left stick drive</div><div>🎮 Right stick aim · RT fire</div>`
+              : `<div><kbd>W A S D</kbd> move</div><div>🖱️ Mouse aims · click / <kbd>F</kbd> fires</div><div><kbd>Space</kbd> jump-jets (robot)</div><div><kbd>Shift</kbd> dash / turbo</div><div><kbd>C</kbd> camera · <kbd>M</kbd> music</div><div>🎮 Sticks move + aim · RT fire · A jump · B dash</div>`
           }
         </div>
-        <p class="muted small">Drones circle you and shoot glowing orbs. Their eye turns pink just before they fire: dodge! Destroyed drones sometimes drop a green repair kit. Every few waves there are more of them.</p>
+        <p class="muted small">🛸 Drones glow pink before they shoot. 🤖 Walkers' visors turn red before a laser burst. 🟢 Jelly aliens hop at you: keep moving! Every 5th wave a <b>Giant Robot</b> comes: shoot its glowing knees, then its chest core. Jump over (robot suit) or outrun its stomp rings.</p>
+        <p class="muted small">Crates: 🔧 green repair · 🛡️ blue shield · ⚡ yellow rapid fire · 🔱 orange triple shot.</p>
         <div class="btn-row"><button class="btn primary" data-act="back">Got it</button></div>`;
     } else if (s === 'settings') {
       const chk = (k: 'sound' | 'music', label: string) => `<label>${label} <input type="checkbox" data-set="${k}" ${settings[k] ? 'checked' : ''}></label>`;
@@ -158,6 +188,18 @@ export class TitansMenu {
           <label>Quality <select data-set="quality">${['auto', 'low', 'medium', 'high'].map((q) => `<option value="${q}" ${settings.quality === q ? 'selected' : ''}>${q[0].toUpperCase() + q.slice(1)}</option>`).join('')}</select></label>
         </div>
         <p class="muted small">Shared with Dust Rally.</p>
+        <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
+    } else if (s === 'garage') {
+      const l = this.loadout;
+      const bar = (label: string, v: number) => `<div class="tt-stat"><span>${label}</span><i><em style="width:${Math.round(v * 100)}%"></em></i></div>`;
+      const card = (sp: UnitSpec) => `<button class="tt-unit ${l.unit === sp.kind ? 'sel' : ''}" data-unit="${sp.kind}">
+          <b>${sp.kind === 'tank' ? '🛡️' : '🤖'} ${sp.name}</b><small>${sp.blurb}</small>
+          ${bar('Armour', sp.bars.armour)}${bar('Speed', sp.bars.speed)}${bar('Firepower', sp.bars.firepower)}${bar('Agility', sp.bars.agility)}
+          <div class="tt-ability">${sp.ability}</div></button>`;
+      html = `<h2>Garage</h2>
+        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}</div>
+        <div class="muted small">Colours</div>
+        <div class="tt-liveries">${LIVERIES.map((v) => `<button class="tt-livery ${v.id === l.livery ? 'sel' : ''}" data-livery="${v.id}" title="${v.name}" style="background:linear-gradient(135deg,#${v.body.toString(16).padStart(6, '0')} 55%,#${v.stripe.toString(16).padStart(6, '0')} 55%)"></button>`).join('')}</div>
         <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
     } else if (s === 'pause') {
       html = `<h2>Paused</h2><div class="btn-col">
@@ -179,6 +221,15 @@ export class TitansMenu {
   }
 
   private onClick(e: Event): void {
+    const u = (e.target as HTMLElement).closest<HTMLElement>('[data-unit],[data-livery]');
+    if (u) {
+      if (u.dataset.unit) this.loadout.unit = u.dataset.unit as UnitKind;
+      if (u.dataset.livery) this.loadout.livery = u.dataset.livery;
+      save('titans.loadout', this.loadout);
+      this.h.loadoutChanged(this.loadout);
+      this.render();
+      return;
+    }
     const t = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!t) return;
     const act = t.dataset.act!;
@@ -186,7 +237,7 @@ export class TitansMenu {
     else if (act === 'resume') this.h.resume();
     else if (act === 'quit') this.h.quit();
     else if (act === 'back') this.show('main');
-    else if (act === 'how' || act === 'settings') this.show(act);
+    else if (act === 'how' || act === 'settings' || act === 'garage') this.show(act);
   }
 
   private onChange(e: Event): void {

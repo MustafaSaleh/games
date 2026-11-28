@@ -46,6 +46,8 @@ export class FollowCamera {
   /** distance multiplier (garage close-up), smoothed toward zoomTarget */
   zoom = 1;
   zoomTarget = 1;
+  /** chase camera size multiplier (distance, height, look height); 1 = cars */
+  chaseScale = 1;
   /** 0..1: push the car toward the top of the screen (garage preview above the panel) */
   shift = 0;
   shiftTarget = 0;
@@ -146,13 +148,13 @@ export class FollowCamera {
     this.ty = damp(this.ty, y, CHASE.heightSmooth, dt);
     this.tx = x;
     this.tz = z;
-    const dist = CHASE.distance + clamp(speed / 46, 0, 1) * CHASE.speedPull;
+    const dist = (CHASE.distance + clamp(speed / 46, 0, 1) * CHASE.speedPull) * this.chaseScale;
     this.dist = dist;
     const fx = Math.sin(this.yaw),
       fz = Math.cos(this.yaw);
     const px = x - fx * dist,
       pz = z - fz * dist;
-    let py = this.ty + CHASE.height;
+    let py = this.ty + CHASE.height * this.chaseScale;
     if (this.ground) py = Math.max(py, this.ground(px, pz) + CHASE.minClearance);
     let sx = 0,
       sy = 0;
@@ -164,7 +166,7 @@ export class FollowCamera {
     }
     const c = this.camera;
     c.position.set(px + sx * fz, py + sy, pz - sx * fx);
-    c.lookAt(x + fx * CHASE.lookAhead, this.ty + CHASE.lookHeight, z + fz * CHASE.lookAhead);
+    c.lookAt(x + fx * CHASE.lookAhead, this.ty + CHASE.lookHeight * this.chaseScale, z + fz * CHASE.lookAhead);
     c.updateMatrixWorld();
   }
 }
