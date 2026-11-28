@@ -3,7 +3,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { clamp, lerp, lerpAngle } from '@engine/core/math';
 import type { Mech } from './mech';
 import type { Scout } from './scout';
-import type { Warbot } from './warbot';
+import { WARBOT, type Warbot } from './warbot';
+import { loadWarbotModel, makeWarbotRig, type WarbotRig } from './warbotModel';
 import { buildCar, disposeCar, type CarModel } from '@engine/render/models';
 import { buildTank, type TankModel } from './tankModel';
 import type { Livery, Unit, UnitKind } from './unit';
@@ -317,6 +318,21 @@ function decal(text: string, color: string): THREE.CanvasTexture | null {
   return t;
 }
 
+const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
+const _v = new THREE.Vector3();
+const RIGID = ['RightForeArm', 'RightHand', 'LeftHand'];
+/** forearm tilt that makes the gatling barrels level (y per 1 m forward) */
+const GUN_PITCH = -0.47;
+/** Warbot model timing: the moment the slam clip hits the ground (s), the unit's wind-up, and
+ *  how long the slam pose holds after the hit; walk / run clip speeds at timeScale 1 (m/s) */
+const SLAM_IMPACT = 1.72;
+const WARBOT_WINDUP = WARBOT.slamWindup;
+const SLAM_HOLD = 0.7;
+const WALK_SPEED = 4.3;
+const RUN_SPEED = 7.5;
+
 /**
  * Warbot: a heavy armoured war walker — boxy chest with vents, numbered shoulder plates,
  * a small head with a blue visor, a 6-barrel gatling with ammo drum, belt and missile pod
@@ -337,8 +353,34 @@ export class WarbotView implements UnitView {
   private crouch = 0;
   private spinA = 0;
   private spinV = 0;
+  /** the Meshy model once loaded (the built-in model shows until then, or if it fails) */
+  private rig: WarbotRig | null = null;
+  private acts: Record<'idle' | 'walk' | 'run' | 'slam', THREE.AnimationAction | null> = { idle: null, walk: null, run: null, slam: null };
+  private slamClock = -1;
+  private gunHold = 0;
+  private wasDashing = false;
+  private dead = false;
 
   constructor(l: Livery) {
+    void loadWarbotModel().then((g) => {
+      if (!g || this.dead) return;
+      const rig = makeWarbotRig(g, l.body, 0.14);
+      this.rig = rig;
+      const act = (name: string, once = false) => {
+        const c = rig.clips.get(name);
+        if (!c) return null;
+        const a = rig.mixer.clipAction(c);
+        if (once) {
+          a.setLoop(THREE.LoopOnce, 1);
+          a.clampWhenFinished = true;
+        } else a.play();
+        a.setEffectiveWeight(0);
+        return a;
+      };
+      this.acts = { idle: act('Idle_02'), walk: act('Walking'), run: act('Running'), slam: act('Charged_Ground_Slam', true) };
+      this.pelvis.visible = false;
+      this.root.add(rig.root);
+    });
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const glowMat = new THREE.MeshBasicMaterial({ color: 0x5fd0ff });
     this.mats.push(mat, glowMat);
@@ -506,6 +548,7 @@ export class WarbotView implements UnitView {
     const w = u as Warbot;
     const h = lerpAngle(u.pHeading, u.heading, alpha);
     pose(this.root, lerp(u.px, u.x, alpha), lerp(u.py, u.y, alpha), lerp(u.pz, u.z, alpha), h, u);
+    if (this.rig) return this.animate(u, lerpAngle(u.pTurret, u.turret, alpha) - h, dt);
 
     // heavy stride: one step every 4.4 m
     const ph = (w.stride / 4.4) * Math.PI * 2;
@@ -542,10 +585,85 @@ export class WarbotView implements UnitView {
     this.gun.position.z += (0.2 - this.gun.position.z) * Math.min(1, dt * 20);
   }
 
+  /** Meshy model: blend idle / walk / run by speed, play the slam, twist the upper body to aim */
+  private animate(u: Unit, aim: number, dt: number): void {
+    const { idle, walk, run, slam } = this.acts;
+    const rig = this.rig!;
+    const sp = u.alive ? u.speed : 0;
+    // the slam clip: start it so its impact lands when the unit's wind-up ends
+    if (u.dashing && !this.wasDashing && slam) {
+      slam.reset().play();
+      slam.time = Math.max(0, SLAM_IMPACT - WARBOT_WINDUP);
+      this.slamClock = 0;
+    }
+    this.wasDashing = u.dashing;
+    let slamW = 0;
+    if (this.slamClock >= 0) {
+      this.slamClock += dt;
+      const fadeAt = WARBOT_WINDUP + SLAM_HOLD;
+      slamW = this.slamClock < fadeAt ? Math.min(1, this.slamClock / 0.08) : Math.max(0, 1 - (this.slamClock - fadeAt) / 0.35);
+      // walking away early: hand back to the legs sooner
+      if (this.slamClock > WARBOT_WINDUP + 0.15 && sp > 2) slamW = Math.min(slamW, Math.max(0, 1 - (sp - 2) / 2));
+      if (slamW <= 0 && this.slamClock > WARBOT_WINDUP) {
+        this.slamClock = -1;
+        slam?.stop();
+      }
+    }
+    const move = clamp((sp - 0.3) / 1.5, 0, 1);
+    const fast = clamp((sp - 4.5) / 3, 0, 1);
+    const rest = 1 - slamW;
+    idle?.setEffectiveWeight((1 - move) * rest);
+    walk?.setEffectiveWeight(move * (1 - fast) * rest);
+    run?.setEffectiveWeight(move * fast * rest);
+    slam?.setEffectiveWeight(slamW);
+    if (walk) walk.timeScale = clamp(sp / WALK_SPEED, 0.5, 1.8);
+    if (run) run.timeScale = clamp(sp / RUN_SPEED, 0.6, 1.5);
+    rig.mixer.update(dt);
+    // the gatling and the fist are skinned over the elbow and wrist: bending those joints bends
+    // the gun barrels, so keep them as modelled and move the arms only from the shoulders
+    for (const name of RIGID) {
+      const b = rig.bones.get(name);
+      const q = b && rig.rest.get(b);
+      if (b && q) b.quaternion.copy(q);
+    }
+    // hold the gatling level and pointing forward (the clips let it hang), except while slamming
+    this.gunHold += ((slamW > 0.05 ? 0 : 1) - this.gunHold) * Math.min(1, dt * 10);
+    const ua = rig.bones.get('RightArm'),
+      fa = rig.bones.get('RightForeArm'),
+      hand = rig.bones.get('RightHand');
+    if (ua?.parent && fa && hand && this.gunHold > 0.01) {
+      fa.getWorldPosition(_r);
+      hand.getWorldPosition(_v);
+      _v.sub(_r).normalize(); // forearm direction now
+      _r.set(0, GUN_PITCH, 1).normalize().applyQuaternion(this.root.quaternion); // wanted: forward
+      _q.setFromUnitVectors(_v, _r);
+      _q2.identity().slerp(_q, this.gunHold);
+      // world rotation -> the upper arm's parent space
+      ua.parent.getWorldQuaternion(_q3);
+      _q.copy(_q3).invert().multiply(_q2).multiply(_q3);
+      ua.quaternion.premultiply(_q);
+    }
+    // twist the upper body toward the aim (split over the spine bones), around the body's up axis
+    const a = Math.atan2(Math.sin(aim), Math.cos(aim)) * (1 - slamW * 0.7);
+    _up.set(0, 1, 0).applyQuaternion(this.root.quaternion);
+    for (const name of ['Spine', 'Spine1', 'Spine2']) {
+      const b = rig.bones.get(name);
+      if (!b?.parent) continue;
+      b.parent.getWorldQuaternion(_q).invert();
+      _f.copy(_up).applyQuaternion(_q).normalize();
+      b.quaternion.premultiply(_q.setFromAxisAngle(_f, a / 3));
+    }
+  }
+
   dispose(): void {
+    this.dead = true;
     this.root.removeFromParent();
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
     for (const t of this.tex) t.dispose();
+    if (this.rig) {
+      this.rig.mixer.stopAllAction();
+      for (const m of this.rig.materials) m.dispose();
+    }
   }
 }
