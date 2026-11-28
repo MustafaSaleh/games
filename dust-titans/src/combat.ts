@@ -25,7 +25,8 @@ export const SHOTS: Record<ShotKind, { damage: number; splash: number; gravity: 
   plasma: { damage: 9, splash: 3.5, gravity: 5, life: 4, radius: 0.9, color: 0xff8a2a, scale: 1.9, round: true },
 };
 
-export type Team = 'player' | 'enemy' | 'blue' | 'red';
+/** 'player' (co-op), 'enemy', or a PvP side ('blue' / 'red' / a player id) */
+export type Team = string;
 
 /** something that can be hit */
 export interface Target {
@@ -266,13 +267,14 @@ export const PICKUPS: Record<PickupKind, { color: number; emissive: number; labe
 /** Power-up crates dropped by destroyed enemies. */
 export class Pickups {
   readonly group = new THREE.Group();
-  private items: { kind: PickupKind; x: number; y: number; z: number; mesh: THREE.Group; life: number }[] = [];
+  private items: { id: number; kind: PickupKind; x: number; y: number; z: number; mesh: THREE.Group; life: number }[] = [];
+  private nextId = 1;
   private box = new THREE.BoxGeometry(1.1, 1.1, 1.1);
   private iconA = new THREE.BoxGeometry(0.75, 0.22, 1.14);
   private iconB = new THREE.BoxGeometry(0.22, 0.75, 1.14);
   private mats = new Map<PickupKind, THREE.Material>();
   private iconMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  private got: { kind: PickupKind; by: number }[] = [];
+  private got: { id: number; kind: PickupKind; by: number }[] = [];
 
   clear(): void {
     for (const it of this.items) this.group.remove(it.mesh);
@@ -283,7 +285,9 @@ export class Pickups {
     return this.items.length;
   }
 
-  drop(x: number, y: number, z: number, kind: PickupKind = 'repair'): void {
+  /** returns the crate id (online: the host's ids are used everywhere) */
+  drop(x: number, y: number, z: number, kind: PickupKind = 'repair', id = this.nextId++): number {
+    this.nextId = Math.max(this.nextId, id + 1);
     let mat = this.mats.get(kind);
     if (!mat) this.mats.set(kind, (mat = new THREE.MeshLambertMaterial({ color: PICKUPS[kind].color, emissive: PICKUPS[kind].emissive })));
     const g = new THREE.Group();
@@ -297,14 +301,23 @@ export class Pickups {
     }
     g.position.set(x, y, z);
     this.group.add(g);
-    this.items.push({ kind, x, y, z, mesh: g, life: 25 });
+    this.items.push({ id, kind, x, y, z, mesh: g, life: 25 });
+    return id;
+  }
+
+  /** someone else took it */
+  remove(id: number): void {
+    const i = this.items.findIndex((it) => it.id === id);
+    if (i < 0) return;
+    this.group.remove(this.items[i].mesh);
+    this.items.splice(i, 1);
   }
 
   /**
    * Move and animate; any collector within `reach` takes the crate. Returns the crates
    * taken this step (`by` = index into collectors).
    */
-  step(dt: number, time: number, ground: Ground, collectors: readonly { x: number; z: number; alive: boolean }[], reach: number): readonly { kind: PickupKind; by: number }[] {
+  step(dt: number, time: number, ground: Ground, collectors: readonly { x: number; z: number; alive: boolean }[], reach: number): readonly { id: number; kind: PickupKind; by: number }[] {
     this.got.length = 0;
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
@@ -317,7 +330,7 @@ export class Pickups {
       for (let c = 0; c < collectors.length; c++) {
         const p = collectors[c];
         if (p.alive && (it.x - p.x) ** 2 + (it.z - p.z) ** 2 < reach * reach) {
-          this.got.push({ kind: it.kind, by: c });
+          this.got.push({ id: it.id, kind: it.kind, by: c });
           it.life = 0;
           break;
         }

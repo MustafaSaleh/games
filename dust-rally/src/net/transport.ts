@@ -66,7 +66,8 @@ class HostHandle implements HostTransport {
 /* ------------------------------------------------------------------ */
 /* PeerJS                                                               */
 /* ------------------------------------------------------------------ */
-export async function peerDriver(): Promise<NetDriver> {
+/** `prefix` keeps each game's rooms apart on the shared PeerJS server */
+export async function peerDriver(prefix = PREFIX): Promise<NetDriver> {
   const { Peer } = await import('peerjs');
   type DataConnection = import('peerjs').DataConnection;
 
@@ -98,7 +99,7 @@ export async function peerDriver(): Promise<NetDriver> {
   return {
     host(code) {
       return new Promise((resolve, reject) => {
-        const peer = new Peer(PREFIX + code.toLowerCase());
+        const peer = new Peer(prefix + code.toLowerCase());
         let ready = false;
         let timer = 0;
         const onVis = () => {
@@ -158,7 +159,7 @@ export async function peerDriver(): Promise<NetDriver> {
         };
         const timer = setTimeout(() => fail('timeout'), 12000);
         peer.on('open', () => {
-          const conn = peer.connect(PREFIX + code.toLowerCase(), { reliable: true, serialization: 'json' });
+          const conn = peer.connect(prefix + code.toLowerCase(), { reliable: true, serialization: 'json' });
           conn.on('error', () => fail('connect-failed'));
           const pc = conn.peerConnection;
           pc?.addEventListener('connectionstatechange', () => {
@@ -200,12 +201,12 @@ type LocalMsg =
   | { t: 'data'; from: string; to: string; d: unknown }
   | { t: 'close'; from: string; to: string };
 
-export function localDriver(): NetDriver {
+export function localDriver(prefix = 'dustrally-'): NetDriver {
   const rid = () => Math.random().toString(36).slice(2, 10);
   const HOST = 'host';
   return {
     async host(code) {
-      const ch = new BroadcastChannel('dustrally-' + code);
+      const ch = new BroadcastChannel(prefix + code);
       // is someone already hosting this code?
       const taken = await new Promise<boolean>((res) => {
         const probe = 'probe-' + rid();
@@ -260,7 +261,7 @@ export function localDriver(): NetDriver {
     },
     join(code) {
       return new Promise((resolve, reject) => {
-        const ch = new BroadcastChannel('dustrally-' + code);
+        const ch = new BroadcastChannel(prefix + code);
         const me = rid();
         let open = false;
         const link = new CallbackLink(

@@ -12,7 +12,7 @@ import { BlobShadow, Particles, Sparks, TireMarks } from '@engine/render/effects
 import { Renderer3D } from '@engine/render/renderer';
 import { PropRenderer } from '@engine/world/props';
 import { LooseRocks, type Pusher } from '@engine/world/rocks';
-import { Terrain } from '@engine/world/terrain';
+import { Terrain, makeGroundSample } from '@engine/world/terrain';
 import { mixRGB, type BiomeMix, type RGB } from '@engine/world/world';
 import { ARENAS, ArenaWorld } from './arena';
 import { Debris, PICKUPS, Pickups, Projectiles, SHOTS, type Impact, type PickupKind, type ShotKind, type Target, type Team } from './combat';
@@ -22,7 +22,11 @@ import { Drone, makeDroneParts, type DroneParts } from './enemies/drones';
 import type { Enemy, EnemyCtx, EnemyFx, EnemyKind, PlayerRef } from './enemies/enemy';
 import { Walker } from './enemies/walker';
 import { TitansInput, TouchSticks } from './input';
-import { BattleHud, TitansMenu, loadLoadout, type Loadout } from './ui';
+import { cleanName, normCode } from '@engine/net/session';
+import { localDriver, peerDriver, type NetDriver } from '@engine/net/transport';
+import { EMOTES, Room, type Mode, type RoomPlayer, type Side } from './net/room';
+import { decodeEnemies, decodePose, decodeShots, encodeEnemy, encodePose, encodeShot, type PoseState } from './net/sync';
+import { BattleHud, SIDE_COLORS, Tags, TitansMenu, loadLoadout, type Loadout, type ResultRow } from './ui';
 import { MECH, Mech } from './units/mech';
 import { TANK, Tank } from './units/tank';
 import { NO_UNIT_INPUT, liveryById, type Livery, type Muzzle, type Unit, type UnitInput } from './units/unit';
@@ -45,9 +49,23 @@ export interface Player {
   rapidT: number;
   tripleT: number;
   score: number;
+  /** knock-outs scored on other players (PvP) */
+  ko: number;
+  slot: number;
+  side: Side;
+  respawnT: number;
   /** player-facing data the enemies see */
   ref: PlayerRef;
 }
+
+/** online: the latest pose received for a remote player */
+interface RemotePose {
+  pose: PoseState;
+  at: number;
+}
+
+const MATCH_TIME: Record<Mode, number> = { coop: 0, arena: 180, alliance: 240 };
+const KO_LIMIT = 10;
 
 const RELOAD = { tank: TANK.reload, mech: MECH.reload };
 
@@ -99,6 +117,17 @@ export class TitansGame {
   private bannerT = 0;
   private ctx: EnemyCtx;
   private loadout: Loadout = loadLoadout();
+  /** online room (null = playing alone) */
+  room: Room | null = null;
+  mode: Mode = 'coop';
+  private remote = new Map<string, RemotePose>();
+  private eshots: number[] = [];
+  private matchT = 0;
+  private overSent = false;
+  private allDownT = 0;
+  private crateT = 6;
+  private tags: Tags;
+  private wakeLock: { release(): Promise<void> } | null = null;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     const q = QUALITY[settings.quality === 'auto' ? autoQuality() : settings.quality];
@@ -116,12 +145,22 @@ export class TitansGame {
     this.input = new TitansInput(canvas);
     this.hud = new BattleHud(ui);
     this.sticks = new TouchSticks(ui, this.input);
+    this.tags = new Tags(ui);
     this.menu = new TitansMenu(ui, {
       play: () => this.startBattle(),
       loadoutChanged: (l) => {
         this.loadout = { ...l };
-        this.setLocalPlayer();
+        if (this.state === 'menu') this.setLocalPlayer();
+        this.room?.setLoadout(l.unit, l.livery);
       },
+      createRoom: (name) => void this.createRoom(name),
+      joinRoom: (code, name) => void this.joinRoom(code, name),
+      leaveRoom: () => this.leaveRoom(),
+      startRoom: () => this.room?.start(),
+      setMode: (m) => this.room?.setMode(m),
+      setSide: (sd) => this.room?.setSide(sd),
+      toRoom: () => this.toRoom(),
+      emote: (i) => this.emote(i),
       resume: () => this.resume(),
       quit: () => this.quit(),
       unlock: () => this.unlockAudio(),
@@ -130,6 +169,7 @@ export class TitansGame {
     this.hud.onPause = () => this.pause();
     this.hud.onCamera = () => updateSettings({ cameraView: settings.cameraView === 'chase' ? 'top' : 'chase' });
     this.hud.onMusic = () => updateSettings({ music: !settings.music });
+    this.hud.onEmote = (i) => this.emote(i);
     onSettingsChange(() => this.applySettings());
     const unlock = () => this.unlockAudio();
     window.addEventListener('pointerdown', unlock, { capture: true });
@@ -150,7 +190,11 @@ export class TitansGame {
       ground: null!,
       players: [],
       enemies: this.enemies,
-      fire: (kind, x, y, z, vx, vy, vz) => this.shots.fire('enemy', kind, x, y, z, vx, vy, vz),
+      fire: (kind, x, y, z, vx, vy, vz) => {
+        if (this.room && !this.room.isHost) return; // guests get enemy shots from the host
+        this.shots.fire('enemy', kind, x, y, z, vx, vy, vz);
+        if (this.room) this.eshots.push(...encodeShot(kind, { x, y, z, vx, vy, vz }));
+      },
       hurt: (i, dmg, fx, fz) => this.hurtPlayer(this.players[i], dmg, fx, fz),
       fx: (kind, x, y, z, size) => this.enemyFx(kind, x, y, z, size ?? 1),
     };
@@ -165,6 +209,11 @@ export class TitansGame {
     this.loadArena();
     this.setLocalPlayer();
     this.toMenu();
+    const code = new URLSearchParams(location.search).get('room');
+    if (code) {
+      this.menu.codeHint = normCode(code);
+      this.menu.show('online');
+    }
     this.resize();
     this.loop.start();
   }
@@ -181,14 +230,14 @@ export class TitansGame {
   /* players                                                              */
   /* ------------------------------------------------------------------ */
 
-  private makePlayer(id: string, name: string, l: Loadout, local: boolean, team: Team = 'player'): Player {
+  private makePlayer(id: string, name: string, l: Loadout, local: boolean, team: Team = 'player', slot = 0, side: Side = 'blue'): Player {
     const livery = liveryById(l.livery);
     const unit: Unit = l.unit === 'mech' ? new Mech() : new Tank();
     const view = makeUnitView(l.unit, livery);
     const bubble = new THREE.Mesh(this.bubbleGeo, this.bubbleMat);
     bubble.visible = false;
     this.r3.scene.add(view.root, bubble);
-    const p: Player = { id, name, team, local, unit, view, livery, bubble, shieldT: 0, rapidT: 0, tripleT: 0, score: 0, ref: { x: 0, y: 0, z: 0, vx: 0, vz: 0, r: unit.spec.radius, alive: false, airborne: false } };
+    const p: Player = { id, name, team, local, unit, view, livery, bubble, shieldT: 0, rapidT: 0, tripleT: 0, score: 0, ko: 0, slot, side, respawnT: 0, ref: { x: 0, y: 0, z: 0, vx: 0, vz: 0, r: unit.spec.radius, alive: false, airborne: false } };
     unit.reset(0, -20, 0, this.terrain);
     return p;
   }
@@ -237,22 +286,53 @@ export class TitansGame {
     this.particles.clear();
     this.sparks.clear();
     this.marks.clear();
-    this.players.forEach((p, i) => {
-      p.unit.reset((i - (this.players.length - 1) / 2) * 8, -20, 0, this.terrain);
+    for (const p of this.players) {
+      const sp = this.spawnPoint(p);
+      p.unit.reset(sp.x, sp.z, sp.h, this.terrain);
       p.shieldT = p.rapidT = p.tripleT = 0;
-      p.score = 0;
-    });
+      p.score = p.ko = p.respawnT = 0;
+    }
+    this.matchT = this.room ? MATCH_TIME[this.mode] : 0;
+    this.overSent = false;
+    this.allDownT = 0;
     const u = this.local!.unit;
     this.cam.snap(u.x, u.y, u.z, 0);
     this.wave = 0;
     this.queue = [];
-    this.waveT = 1.5;
+    this.waveT = this.room ? 3 : 1.5;
     this.overT = 0;
     this.hud.boss(false);
   }
 
+  /** where a player starts / respawns */
+  private spawnPoint(p: Player): { x: number; z: number; h: number } {
+    if (this.room && this.mode === 'arena') {
+      const a = (p.slot / 4) * Math.PI * 2 + Math.PI / 4;
+      return { x: Math.sin(a) * 60, z: Math.cos(a) * 60, h: a + Math.PI };
+    }
+    if (this.room && this.mode === 'alliance') {
+      const mates = this.players.filter((q) => q.side === p.side).sort((a, b) => a.slot - b.slot);
+      const k = mates.indexOf(p);
+      const dir = p.side === 'blue' ? -1 : 1;
+      return { x: (k - (mates.length - 1) / 2) * 12, z: dir * 62, h: dir < 0 ? 0 : Math.PI };
+    }
+    return { x: (p.slot - (this.players.length - 1) / 2) * 9, z: -20, h: 0 };
+  }
+
+  /** do enemies / waves happen in this game? */
+  get enemiesOn(): boolean {
+    return !this.room || this.mode !== 'arena';
+  }
+
+  /** does this device run the enemies (solo, or the online host)? */
+  get authority(): boolean {
+    return !this.room || this.room.isHost;
+  }
+
   private toMenu(): void {
     this.state = 'menu';
+    this.hud.online(false);
+    this.tags.clear();
     this.resetBattle();
     for (let i = 0; i < 3; i++) this.spawn('drone', i * 2.1);
     this.hud.show(false);
@@ -276,6 +356,11 @@ export class TitansGame {
 
   private pause(): void {
     if (this.state !== 'playing') return;
+    if (this.room) {
+      // online the battle can't stop: just show the menu over it
+      this.menu.show('pause');
+      return;
+    }
     this.state = 'paused';
     this.audio.setActive(false);
     this.sticks.show(false);
@@ -283,6 +368,10 @@ export class TitansGame {
   }
 
   private resume(): void {
+    if (this.room && this.state === 'playing') {
+      this.menu.hide();
+      return;
+    }
     this.state = 'playing';
     this.menu.hide();
     this.audio.setActive(true);
@@ -340,11 +429,417 @@ export class TitansGame {
   }
 
   /* ------------------------------------------------------------------ */
+  /* online                                                               */
+  /* ------------------------------------------------------------------ */
+
+  private driver(): Promise<NetDriver> {
+    return new URLSearchParams(location.search).get('net') === 'local' ? Promise.resolve(localDriver('dusttitans-')) : peerDriver('dusttitans-v1-');
+  }
+
+  private netMessage(e: unknown): string {
+    const m = (e as Error)?.message ?? '';
+    if (m === 'not-found') return "Couldn't find that room. Check the code (like TIGER-42) and that your friend's game is open.";
+    if (m === 'full') return 'That room is full (4 players max).';
+    if (m === 'playing') return 'That room is in the middle of a battle. Try again when it is back in the room.';
+    if (m === 'version') return 'You and the host have different versions of the game. Both of you: reload the page, then try again. (version)';
+    if (m === 'offline') return "Couldn't reach the room server. Check your internet and try again. (offline)";
+    if (m === 'timeout') return "Found the room, but the host's device didn't answer. The host must keep the game open on screen. (timeout)";
+    if (m === 'connect-failed') return "Found the room, but couldn't connect to the host's device. Try another Wi-Fi or mobile data. (connect-failed)";
+    return `Something went wrong. Try again. (${m || 'unknown'})`;
+  }
+
+  private async createRoom(name: string): Promise<void> {
+    save('mp.name', cleanName(name));
+    this.menu.netBusy = 'Creating room…';
+    this.menu.netError = '';
+    this.menu.refresh();
+    try {
+      const room = await Room.create(await this.driver(), name, this.loadout.unit, this.loadout.livery, ARENAS[0].id);
+      this.bindRoom(room);
+    } catch (e) {
+      this.menu.netBusy = '';
+      this.menu.netError = this.netMessage(e);
+      this.menu.refresh();
+    }
+  }
+
+  private async joinRoom(code: string, name: string): Promise<void> {
+    save('mp.name', cleanName(name));
+    this.menu.netBusy = 'Joining…';
+    this.menu.netError = '';
+    this.menu.refresh();
+    try {
+      const driver = await this.driver();
+      const until = performance.now() + 60000;
+      let room: Room | null = null;
+      for (let attempt = 1; !room; attempt++) {
+        try {
+          room = await Room.join(driver, normCode(code), name, this.loadout.unit, this.loadout.livery);
+        } catch (e) {
+          const m = (e as Error).message;
+          const retry = m === 'timeout' || m === 'closed' || (m === 'not-found' && attempt < 4);
+          if (!retry || performance.now() > until || this.menu.current !== 'online') throw e;
+          this.menu.netBusy = m === 'not-found' ? `Looking for room ${normCode(code)}…` : "Waiting for the host's device to answer…";
+          this.menu.refresh();
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+      this.bindRoom(room);
+    } catch (e) {
+      this.menu.netBusy = '';
+      this.menu.netError = this.netMessage(e);
+      this.menu.refresh();
+    }
+  }
+
+  private bindRoom(room: Room): void {
+    this.room = room;
+    this.menu.room = room;
+    this.menu.netBusy = '';
+    const url = new URL(location.href);
+    url.search = '';
+    url.searchParams.set('room', room.code);
+    if (new URLSearchParams(location.search).get('net') === 'local') url.searchParams.set('net', 'local');
+    this.menu.shareUrl = url.toString();
+    room.ev = {
+      lobby: () => {
+        if (this.menu.current === 'room') this.menu.refresh();
+      },
+      start: (mode, _arena, players, seed) => this.startOnline(mode, players, seed),
+      game: (t, id, d) => this.onGame(t, id, d),
+      left: (id) => {
+        const p = this.players.find((x) => x.id === id && !x.local);
+        if (p) {
+          if (this.state === 'playing') this.banner(`${p.name} left`, 1800);
+          this.removePlayer(p);
+          this.remote.delete(id);
+        }
+        if (this.menu.current === 'room') this.menu.refresh();
+      },
+      closed: (reason) => {
+        this.dropRoom();
+        this.toMenu();
+        this.menu.netError = reason;
+        this.menu.show('online');
+      },
+    };
+    void this.keepAwake(true);
+    this.menu.show('room');
+  }
+
+  private dropRoom(): void {
+    this.room = null;
+    this.menu.room = null;
+    this.remote.clear();
+    for (const p of this.players.filter((x) => !x.local)) this.removePlayer(p);
+    void this.keepAwake(false);
+  }
+
+  private leaveRoom(): void {
+    const r = this.room;
+    this.dropRoom();
+    r?.leave();
+    this.setLocalPlayer();
+    this.toMenu();
+  }
+
+  /** back from a battle / results to the room lobby */
+  private toRoom(): void {
+    if (!this.room) return this.toMenu();
+    for (const p of this.players.filter((x) => !x.local)) this.removePlayer(p);
+    this.remote.clear();
+    this.setLocalPlayer();
+    this.toMenu();
+    this.room.endGame();
+    this.menu.show('room');
+  }
+
+  private async keepAwake(on: boolean): Promise<void> {
+    const nav = navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } };
+    try {
+      if (on && !this.wakeLock && nav.wakeLock && !document.hidden) this.wakeLock = await nav.wakeLock.request('screen');
+      else if (!on && this.wakeLock) {
+        await this.wakeLock.release();
+        this.wakeLock = null;
+      }
+    } catch {
+      /* not allowed: fine */
+    }
+  }
+
+  /** the host pressed Start: build every player and go */
+  private startOnline(mode: Mode, players: RoomPlayer[], _seed: number): void {
+    const room = this.room;
+    if (!room) return;
+    this.mode = mode;
+    for (const p of [...this.players]) this.removePlayer(p);
+    this.remote.clear();
+    const teamOf = (rp: RoomPlayer): Team => (mode === 'coop' ? 'player' : mode === 'arena' ? 'p-' + rp.id : rp.side);
+    for (const rp of players) {
+      const local = rp.id === room.myId;
+      const l: Loadout = local ? this.loadout : { unit: rp.unit, livery: rp.livery };
+      const p = this.makePlayer(rp.id, rp.name, l, local, teamOf(rp), rp.slot, rp.side);
+      if (local) this.players.unshift(p);
+      else this.players.push(p);
+    }
+    this.sticks.setUnit(this.loadout.unit);
+    this.startBattle();
+    this.hud.online(true);
+    this.banner(mode === 'coop' ? '🤝 Defend together!' : mode === 'arena' ? '⚔️ Arena battle!' : this.local!.side === 'blue' ? '🔵 Blue team: go!' : '🔴 Red team: go!', 2200);
+  }
+
+  private emote(i: number): void {
+    if (!this.room || !EMOTES[i]) return;
+    this.room.send('emote', i);
+    this.tags.emote(this.room.myId, EMOTES[i]);
+  }
+
+  /** a game message from another device */
+  private onGame(t: string, id: string, d: unknown): void {
+    const p = this.players.find((x) => x.id === id);
+    if (t === 'emote') {
+      const e = EMOTES[d as number];
+      if (e) this.tags.emote(id, e);
+      return;
+    }
+    if (this.state === 'menu' && t !== 'over') return;
+    if (t === 'pose') {
+      const pose = decodePose(d);
+      if (pose && p && !p.local) this.remote.set(id, { pose, at: performance.now() });
+    } else if (t === 'shot' && p && !p.local) {
+      for (const sh of decodeShots(d)) {
+        this.shots.fire(p.team, sh.kind, sh.x, sh.y, sh.z, sh.vx, sh.vy, sh.vz, p.id);
+        this.sparks.emit(sh.x, sh.y, sh.z, sh.kind === 'shell' ? 8 : 3, sh.kind === 'shell' ? 6 : 3);
+      }
+      p.unit.fired = true;
+    } else if (t === 'eshot') {
+      for (const sh of decodeShots(d)) this.shots.fire('enemy', sh.kind, sh.x, sh.y, sh.z, sh.vx, sh.vy, sh.vz);
+    } else if (t === 'enemies') this.applyEnemies(d);
+    else if (t === 'wave') {
+      const w = d as { n: number; boss: boolean };
+      this.wave = +w.n || 0;
+      this.banner(w.boss ? '⚠️ GIANT ROBOT!' : `WAVE ${this.wave}`, w.boss ? 2600 : 1800);
+      this.audio.beep(true);
+    } else if (t === 'drop') {
+      const c = d as { i: number; x: number; y: number; z: number; k: PickupKind };
+      if (PICKUPS[c.k]) this.pickups.drop(c.x, c.y, c.z, c.k, c.i);
+    } else if (t === 'take') this.pickups.remove(+(d as number));
+    else if (t === 'ko') {
+      const by = this.players.find((x) => x.id === String((d as { by: string }).by));
+      if (by) by.ko++;
+      if (p) this.koBanner(p, by);
+    } else if (t === 'hit' && this.authority) {
+      const h = d as { e: string; t: string; dmg: number };
+      const e = this.enemies.find((x) => x.id === h.e);
+      if (!e || !(h.dmg > 0) || h.dmg > 80) return;
+      const tg: Target[] = [];
+      e.targets(tg);
+      const target = tg.find((x) => x.id === h.t) ?? tg.find((x) => !x.armor);
+      if (target && e.damage(target, h.dmg, this.ctx) === 'killed') this.onKill(e, p);
+    } else if (t === 'score') {
+      const sc = d as Record<string, number>;
+      for (const q of this.players) if (typeof sc[q.id] === 'number') q.score = sc[q.id];
+    } else if (t === 'clock') this.matchT = +(d as number) || 0;
+    else if (t === 'over') this.showMpOver(d as { title: string; sub: string });
+  }
+
+  private koBanner(victim: Player, by: Player | undefined): void {
+    if (by && by.local) this.banner(`💥 You knocked out ${victim.name}!`, 1600);
+    else if (victim.local) this.banner(by ? `${by.name} knocked you out!` : 'KNOCKED OUT!', 1800);
+    else this.banner(by ? `${by.name} 💥 ${victim.name}` : `${victim.name} is out`, 1400);
+  }
+
+  /** guests: follow the host's enemies */
+  private applyEnemies(d: unknown): void {
+    const rows = decodeEnemies(d);
+    const seen = new Set<string>();
+    for (const r of rows) {
+      seen.add(r.id);
+      let e = this.enemies.find((x) => x.id === r.id);
+      if (!e) {
+        e = this.spawn(r.kind, 0, r.id);
+        e.x = r.x;
+        e.y = r.y;
+        e.z = r.z;
+        if (r.kind === 'boss') {
+          this.hud.boss(true);
+          this.updateMusic();
+        }
+      }
+      const far = Math.hypot(e.x - r.x, e.z - r.z) > 8;
+      e.x = far ? r.x : e.x + (r.x - e.x) * 0.5;
+      e.z = far ? r.z : e.z + (r.z - e.z) * 0.5;
+      if (e.kind === 'drone') e.y = far ? r.y : e.y + (r.y - e.y) * 0.5;
+      e.vx = r.vx;
+      e.vz = r.vz;
+      const any = e as unknown as { hp?: number; heading?: number };
+      if (r.kind !== 'boss') {
+        if (any.hp !== undefined && r.hp < any.hp) (e as unknown as { hitFlash: number }).hitFlash = 0.15;
+        any.hp = r.hp;
+      }
+      if (r.kind === 'walker' || r.kind === 'boss') any.heading = r.heading;
+      if (r.boss) (e as Boss).netState(r.boss.k0, r.boss.k1, r.boss.core, r.boss.state);
+    }
+    // gone on the host: destroyed
+    for (const e of this.enemies)
+      if (!seen.has(e.id) && e.alive) {
+        if (e.kind === 'boss') (e as Boss).netState(0, 0, 0, 3);
+        else {
+          (e as unknown as { hp: number }).hp = 0;
+          this.killFx(e);
+        }
+      }
+  }
+
+  /** every step online: send my pose; the host also sends enemies, shots, scores */
+  private netSend(): void {
+    const room = this.room;
+    const me = this.local;
+    if (!room || !me || this.state !== 'playing') return;
+    if (this.steps % 3 === 0) room.send('pose', encodePose(me.unit, me.shieldT > 0));
+    if (!room.isHost) return;
+    if (this.eshots.length) {
+      room.send('eshot', this.eshots);
+      this.eshots = [];
+    }
+    if (this.enemiesOn && this.steps % 6 === 0) room.send('enemies', this.enemies.filter((e) => e.alive || e.kind === 'boss').map(encodeEnemy));
+    if (this.steps % 30 === 0) {
+      const sc: Record<string, number> = {};
+      for (const p of this.players) sc[p.id] = p.score;
+      room.send('score', sc);
+      if (this.matchT > 0) room.send('clock', Math.round(this.matchT));
+    }
+  }
+
+  /** remote units follow their latest pose (a little extrapolation, smoothed) */
+  private applyRemote(p: Player, dt: number): void {
+    const r = this.remote.get(p.id);
+    const u = p.unit;
+    u.px = u.x;
+    u.py = u.y;
+    u.pz = u.z;
+    u.pHeading = u.heading;
+    u.pTurret = u.turret;
+    u.fired = false;
+    u.landed = 0;
+    if (!r) return;
+    const q = r.pose;
+    const age = Math.min(0.25, (performance.now() - r.at) / 1000);
+    const tx = q.x + q.vx * age,
+      tz = q.z + q.vz * age,
+      ty = q.y + (q.airborne ? q.vy * age : 0);
+    const k = 1 - Math.exp(-14 * dt);
+    if (Math.hypot(tx - u.x, tz - u.z) > 10) {
+      u.x = tx;
+      u.z = tz;
+      u.y = ty;
+    } else {
+      u.x += (tx - u.x) * k;
+      u.y += (ty - u.y) * k;
+      u.z += (tz - u.z) * k;
+    }
+    u.heading = lerpAngle(u.heading, q.heading, k);
+    u.turret = lerpAngle(u.turret, q.turret, k);
+    u.vx = q.vx;
+    u.vy = q.vy;
+    u.vz = q.vz;
+    const wasAlive = u.alive;
+    u.hp = q.hp;
+    if (wasAlive && !u.alive) {
+      this.explode(u.x, u.y + 1.5, u.z, 2.2);
+      this.debris.burst(u.x, u.y + 1.5, u.z, 12, 1.4);
+    }
+    u.energy = q.energy;
+    u.airborne = q.airborne;
+    u.dashing = q.dashing;
+    const m = u as Mech;
+    if (u.kind === 'mech') {
+      m.stride = q.stride;
+      m.jets = q.jets;
+    }
+    u.drive = clamp(Math.hypot(q.vx, q.vz) / (u.kind === 'mech' ? MECH.maxSpeed : TANK.maxSpeed), 0, 1);
+    p.shieldT = q.shield ? 1 : 0;
+    const g = this.terrain.sample(u.x, u.z, this.gs);
+    u.upX += (g.nx * (u.kind === 'mech' ? 0.35 : 1) - u.upX) * k;
+    u.upY += ((u.kind === 'mech' ? 1 : g.ny) - u.upY) * k;
+    u.upZ += (g.nz * (u.kind === 'mech' ? 0.35 : 1) - u.upZ) * k;
+  }
+  private gs = makeGroundSample();
+
+  /** online end of game: the host decides */
+  private checkMpOver(dt: number): void {
+    const room = this.room;
+    if (!room || !room.isHost || this.overSent) return;
+    let over: { title: string; sub: string } | null = null;
+    if (this.mode === 'coop') {
+      const down = this.players.every((p) => !p.unit.alive);
+      this.allDownT = down ? this.allDownT + dt : 0;
+      if (this.allDownT > 2) over = { title: 'Knocked out!', sub: `Your team reached wave ${this.wave}` };
+    } else {
+      this.matchT -= dt;
+      const top = Math.max(...this.players.map((p) => p.ko));
+      if (this.matchT <= 0 || (this.mode === 'arena' && top >= KO_LIMIT)) over = { title: '', sub: '' };
+    }
+    if (!over) return;
+    this.overSent = true;
+    if (this.mode !== 'coop') over = this.pvpResult();
+    room.send('over', over);
+    this.showMpOver(over);
+  }
+
+  private teamPoints(side: Side): number {
+    return this.players.filter((p) => p.side === side).reduce((s, p) => s + p.score + p.ko * 1000, 0);
+  }
+
+  private pvpResult(): { title: string; sub: string } {
+    if (this.mode === 'alliance') {
+      const b = this.teamPoints('blue'),
+        r = this.teamPoints('red');
+      return { title: b === r ? "It's a draw!" : b > r ? '🔵 Blue team wins!' : '🔴 Red team wins!', sub: 'Points: enemies destroyed + 1000 per knock-out' };
+    }
+    const best = [...this.players].sort((a, b) => b.ko - a.ko || b.score - a.score)[0];
+    return { title: `🏆 ${best?.name ?? ''} wins!`, sub: `Most knock-outs (${best?.ko ?? 0})` };
+  }
+
+  private showMpOver(o: { title: string; sub: string }): void {
+    if (this.state === 'menu') return;
+    this.state = 'over';
+    const rows: ResultRow[] = [...this.players]
+      .sort((a, b) => (this.mode === 'coop' ? b.score - a.score : b.ko - a.ko || b.score - a.score))
+      .map((p) => ({ name: p.name, me: p.local, score: p.score, ko: p.ko, side: this.mode === 'alliance' ? p.side : undefined }));
+    this.menu.mpResult = { title: String(o.title || ''), sub: String(o.sub || ''), rows, teams: this.mode === 'alliance' ? { blue: this.teamPoints('blue'), red: this.teamPoints('red') } : undefined };
+    this.hud.show(false);
+    this.sticks.show(false);
+    this.audio.setActive(false);
+    this.menu.show('mpover');
+    this.updateMusic();
+  }
+
+  /** local player knocked out online: respawn (PvP always, co-op while a teammate stands) */
+  private respawnStep(dt: number): void {
+    const me = this.local;
+    if (!this.room || !me || me.unit.alive || this.state !== 'playing') return;
+    const mates = this.players.filter((p) => !p.local && p.team === me.team && p.unit.alive);
+    if (this.mode === 'coop' && !mates.length) {
+      me.respawnT = 6;
+      return;
+    }
+    me.respawnT -= dt;
+    this.hud.set('banner', `Back in ${Math.max(1, Math.ceil(me.respawnT))}…`);
+    if (me.respawnT > 0) return;
+    const sp = this.mode === 'coop' && mates.length ? { x: mates[0].unit.x + 6, z: mates[0].unit.z, h: mates[0].unit.heading } : this.spawnPoint(me);
+    me.unit.reset(sp.x, sp.z, sp.h, this.terrain);
+    if (this.mode === 'coop') me.unit.hp = me.unit.spec.maxHp * 0.6;
+    me.shieldT = 3;
+    this.hud.set('banner', '');
+  }
+
+  /* ------------------------------------------------------------------ */
   /* enemies                                                              */
   /* ------------------------------------------------------------------ */
 
-  spawn(kind: EnemyKind, angle?: number): Enemy {
-    const id = kind + this.nextId++;
+  spawn(kind: EnemyKind, angle?: number, forceId?: string): Enemy {
+    const id = forceId ?? kind + this.nextId++;
     const seed = this.nextId;
     const e: Enemy = kind === 'drone' ? new Drone(id, this.droneParts, seed) : kind === 'walker' ? new Walker(id, seed) : kind === 'alien' ? new Alien(id, seed) : new Boss(id, bossLevel(this.wave));
     const me = this.local?.unit;
@@ -405,6 +900,18 @@ export class TitansGame {
     // ---- players ----
     for (const p of this.players) {
       const u = p.unit;
+      if (!p.local && this.room) {
+        this.applyRemote(p, dt);
+        const r = p.ref;
+        r.x = u.x;
+        r.y = u.y;
+        r.z = u.z;
+        r.vx = u.vx;
+        r.vz = u.vz;
+        r.airborne = u.airborne;
+        r.alive = playing && u.alive;
+        continue;
+      }
       const ui: UnitInput = p.local && playing && u.alive ? inp.unit : NO_UNIT_INPUT;
       u.reloadScale = p.rapidT > 0 ? 0.45 : 1;
       u.step(dt, ui, terrain);
@@ -466,8 +973,12 @@ export class TitansGame {
     this.shots.step(dt, terrain, tg, this.impacts);
     for (const hit of this.impacts) this.onImpact(hit);
     this.debris.step(dt, terrain);
-    const got = this.pickups.step(dt, this.time, terrain, this.players.map((p) => ({ x: p.unit.x, z: p.unit.z, alive: p.unit.alive })), 3.2);
-    for (const g of got) this.applyPickup(this.players[g.by], g.kind);
+    const me = this.local;
+    const got = this.pickups.step(dt, this.time, terrain, me ? [{ x: me.unit.x, z: me.unit.z, alive: me.unit.alive && playing }] : [], 3.2);
+    for (const g of got) {
+      this.applyPickup(me, g.kind);
+      this.room?.send('take', g.id);
+    }
 
     // ---- clean up destroyed enemies ----
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -482,8 +993,24 @@ export class TitansGame {
       }
     }
 
-    if (playing) this.waves(dt);
-    if (playing && this.players.every((p) => !p.unit.alive)) {
+    if (playing && this.authority && this.enemiesOn) this.waves(dt);
+    if (playing && this.room?.isHost && this.mode === 'arena') {
+      this.crateT -= dt;
+      if (this.crateT <= 0) {
+        this.crateT = 10;
+        const a = Math.random() * Math.PI * 2,
+          R = Math.random() * 70;
+        const k: PickupKind[] = ['repair', 'shield', 'rapid', 'triple'];
+        this.dropCrate(Math.sin(a) * R, this.terrain.heightAt(Math.sin(a) * R, Math.cos(a) * R) + 8, Math.cos(a) * R, k[Math.floor(Math.random() * 4)]);
+      }
+    }
+    if (this.room) {
+      if (playing) {
+        this.respawnStep(dt);
+        this.checkMpOver(dt);
+      }
+      this.netSend();
+    } else if (playing && this.players.every((p) => !p.unit.alive)) {
       this.overT += dt;
       if (this.overT > 1.8) this.gameOver();
     }
@@ -499,6 +1026,7 @@ export class TitansGame {
         this.spawnT = 0;
         this.waveT = 3;
         const boss = this.queue.includes('boss');
+        this.room?.send('wave', { n: this.wave, boss });
         this.banner(boss ? `⚠️ GIANT ROBOT!` : `WAVE ${this.wave}`, boss ? 2600 : 1800);
         this.audio.beep(true);
         if (boss) this.audio.impact(12);
@@ -524,6 +1052,7 @@ export class TitansGame {
     const u = p.unit;
     const kind: ShotKind = u.spec.shot;
     const spreads = p.tripleT > 0 ? [0, -0.13, 0.13] : [0];
+    const sent: number[] = [];
     let vy = 0;
     for (let i = 0; i < spreads.length; i++) {
       u.muzzle(this.muzzle, spreads[i]);
@@ -533,7 +1062,9 @@ export class TitansGame {
         vy = m.vy;
       } else m.vy = vy;
       this.shots.fire(p.team, kind, m.x, m.y, m.z, m.vx, m.vy, m.vz, p.id);
+      if (this.room) sent.push(...encodeShot(kind, m));
     }
+    if (this.room && sent.length) this.room.send('shot', sent);
     const m = this.muzzle;
     const s = Math.sin(u.turret),
       c = Math.cos(u.turret);
@@ -558,6 +1089,19 @@ export class TitansGame {
     let best: { x: number; y: number; z: number; vx: number; vz: number } | null = null,
       bestScore = 0.3; // ~17° off the barrel
     const pts: { x: number; y: number; z: number }[] = [];
+    const me = this.local;
+    for (const p of this.players) {
+      if (!this.room || p.local || !p.unit.alive || p.team === me?.team) continue;
+      const u = p.unit;
+      const dx = u.x - m.x,
+        dz = u.z - m.z;
+      if (Math.hypot(dx, dz) > 95) continue;
+      const off = Math.abs(Math.atan2(dx * m.vz - dz * m.vx, dx * m.vx + dz * m.vz));
+      if (off < bestScore) {
+        bestScore = off;
+        best = { x: u.x, y: u.y + u.spec.hitHeight, z: u.z, vx: u.vx, vz: u.vz };
+      }
+    }
     for (const e of this.enemies) {
       if (!e.alive) continue;
       pts.length = 0;
@@ -596,7 +1140,7 @@ export class TitansGame {
       const size = hit.kind === 'shell' ? 1 : 0.5;
       if (hit.target?.owner && hit.target.team === 'enemy') {
         const e = hit.target.owner as Enemy;
-        const res = e.damage(hit.target, cfg.damage, this.ctx);
+        const res = this.authority ? e.damage(hit.target, cfg.damage, this.ctx) : (hit.target.armor ? 'armor' : 'hit');
         if (res === 'armor') {
           this.sparks.emit(hit.x, hit.y, hit.z, 14, 6);
           this.audio.impact(4);
@@ -609,12 +1153,12 @@ export class TitansGame {
           }
         }
       } else if (hit.target?.owner) {
-        // PvP: a player hit another team's player
+        // PvP: a player hit another team's player (the victim's device decides)
         this.explode(hit.x, hit.y, hit.z, size * 0.8);
-        this.hurtPlayer(hit.target.owner as Player, cfg.damage * 0.6, hit.x, hit.z);
+        this.hurtPlayer(hit.target.owner as Player, cfg.damage * 0.6, hit.x, hit.z, hit.by);
       } else this.explode(hit.x, hit.y, hit.z, size);
       // splash on other enemies (weak points / bodies, not armour)
-      if (cfg.splash > 0) {
+      if (cfg.splash > 0 && this.authority) {
         for (const e of this.enemies) {
           if (!e.alive) continue;
           const tg: Target[] = [];
@@ -653,8 +1197,34 @@ export class TitansGame {
     }
   }
 
+  /** damage dealt by a stomp / ram: applied here, or reported to the online host */
+  private dealDamage(e: Enemy, t: Target, dmg: number, by: Player): void {
+    if (this.authority) {
+      if (e.damage(t, dmg, this.ctx) === 'killed') this.onKill(e, by);
+    } else this.room?.send('hit', { e: e.id, t: t.id, dmg: Math.round(dmg) });
+  }
+
   private onKill(e: Enemy, by: Player | undefined): void {
     (by ?? this.local!).score += e.score * (e.kind === 'boss' ? 1 : Math.max(1, Math.ceil(this.wave / 2)));
+    const y = this.killFx(e);
+    if (e.kind === 'boss') {
+      for (let i = 0; i < 3; i++) this.dropCrate(e.x + (i - 1) * 4, e.y + 6, e.z, (['repair', 'shield', 'triple'] as PickupKind[])[i]);
+      return;
+    }
+    const chance = (e.kind === 'walker' ? 0.45 : e.kind === 'alien' ? 0.2 : 0.25) * (this.players.length > 1 ? 1.3 : 1);
+    if (Math.random() < chance) {
+      const r = Math.random();
+      this.dropCrate(e.x, y, e.z, r < 0.45 ? 'repair' : r < 0.65 ? 'shield' : r < 0.85 ? 'rapid' : 'triple');
+    }
+  }
+
+  private dropCrate(x: number, y: number, z: number, k: PickupKind): void {
+    const i = this.pickups.drop(x, y, z, k);
+    this.room?.send('drop', { i, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, z: Math.round(z * 10) / 10, k });
+  }
+
+  /** destruction effects; returns the effect height */
+  private killFx(e: Enemy): number {
     const y = e.kind === 'walker' ? e.y + 2.3 : e.kind === 'alien' ? e.y + 1 : e.y;
     if (e.kind === 'alien') {
       const c = new THREE.Color((e as Alien).color);
@@ -663,17 +1233,11 @@ export class TitansGame {
       this.audio.splat(true);
     } else if (e.kind === 'boss') {
       this.banner('🏆 GIANT ROBOT DOWN!', 3000);
-      for (let i = 0; i < 3; i++) this.pickups.drop(e.x + (i - 1) * 4, e.y + 6, e.z, (['repair', 'shield', 'triple'] as PickupKind[])[i]);
-      return;
     } else {
       this.explode(e.x, y, e.z, e.kind === 'walker' ? 1.6 : 1.3);
       this.debris.burst(e.x, y, e.z, e.kind === 'walker' ? 10 : 7, e.kind === 'walker' ? 1.1 : 0.9);
     }
-    const chance = e.kind === 'walker' ? 0.45 : e.kind === 'alien' ? 0.2 : 0.25;
-    if (Math.random() < chance) {
-      const r = Math.random();
-      this.pickups.drop(e.x, y, e.z, r < 0.45 ? 'repair' : r < 0.65 ? 'shield' : r < 0.85 ? 'rapid' : 'triple');
-    }
+    return y;
   }
 
   private applyPickup(p: Player | undefined, kind: PickupKind): void {
@@ -688,8 +1252,9 @@ export class TitansGame {
     }
   }
 
-  hurtPlayer(p: Player | undefined, dmg: number, fromX: number, fromZ: number): void {
+  hurtPlayer(p: Player | undefined, dmg: number, fromX: number, fromZ: number, by?: string): void {
     if (!p || !p.unit.alive || this.state !== 'playing') return;
+    if (this.room && !p.local) return; // every device decides for its own unit
     const u = p.unit;
     if (p.shieldT > 0) {
       this.sparks.emit(u.x, u.y + 2, u.z, 10, 4);
@@ -700,7 +1265,7 @@ export class TitansGame {
     const dx = u.x - fromX,
       dz = u.z - fromZ;
     const l = Math.hypot(dx, dz) || 1;
-    const kick = (dmg * 120) / u.spec.mass;
+    const kick = Math.min(6, (dmg * 120) / u.spec.mass);
     u.vx += (dx / l) * kick;
     u.vz += (dz / l) * kick;
     if (p.local) {
@@ -712,9 +1277,15 @@ export class TitansGame {
     if (u.hp <= 0) {
       u.hp = 0;
       this.overT = 0;
+      p.respawnT = this.mode === 'coop' ? 8 : 4;
       this.explode(u.x, u.y + 1.5, u.z, 2.2);
       this.debris.burst(u.x, u.y + 1.5, u.z, 12, 1.4);
-      if (p.local) this.banner('KNOCKED OUT!', 2000);
+      const killer = by ? this.players.find((q) => q.id === by && q !== p) : undefined;
+      if (this.room) {
+        this.room.send('ko', { by: killer?.id ?? '' });
+        if (killer) killer.ko++;
+        this.koBanner(p, killer);
+      } else if (p.local) this.banner('KNOCKED OUT!', 2000);
     }
   }
 
@@ -722,7 +1293,7 @@ export class TitansGame {
   private contacts(dt: number): void {
     for (const p of this.players) {
       const u = p.unit;
-      if (!u.alive) continue;
+      if (!u.alive || !p.local) continue;
       for (const e of this.enemies) {
         if (!e.alive || e.kind === 'drone') continue;
         const dx = u.x - e.x,
@@ -754,13 +1325,12 @@ export class TitansGame {
           e.targets(tg);
           const t = tg.find((x) => !x.armor) ?? tg[0];
           if (t) {
-            const res = e.damage(t, e.kind === 'boss' ? 15 : 45, this.ctx);
+            this.dealDamage(e, t, e.kind === 'boss' ? 15 : 45, p);
             this.sparks.emit(e.x, u.y + 1.5, e.z, 24, 7);
             this.audio.impact(12);
             if (p.local) this.cam.shake(0.6);
             e.vx -= nx * 14;
             e.vz -= nz * 14;
-            if (res === 'killed') this.onKill(e, p);
           }
         }
       }
@@ -778,13 +1348,12 @@ export class TitansGame {
       e.targets(tg);
       const t = tg.find((x) => !x.armor && Math.hypot(x.x - u.x, x.z - u.z) < 6 + x.r);
       if (!t) continue;
-      const res = e.damage(t, 22 * power, this.ctx);
+      this.dealDamage(e, t, 22 * power, p);
       const d = Math.hypot(e.x - u.x, e.z - u.z) || 1;
       if (e.kind !== 'boss') {
         e.vx += ((e.x - u.x) / d) * 12;
         e.vz += ((e.z - u.z) / d) * 12;
       }
-      if (res === 'killed') this.onKill(e, p);
     }
   }
 
@@ -866,6 +1435,40 @@ export class TitansGame {
     if (t.speed > 6 && Math.random() < (t.dashing ? 1 : 0.5)) this.puff(t.x - s * 3, t.y + 0.3, t.z - c * 3, 1, [col[0] * 1.1, col[1] * 1.1, col[2] * 1.1], 1.4);
   }
 
+  private colorOf(p: Player): string {
+    if (this.mode === 'alliance') return SIDE_COLORS[p.side];
+    return '#' + p.livery.body.toString(16).padStart(6, '0');
+  }
+
+  private updateTags(dt: number): void {
+    this.tags.update(
+      this.cam.camera,
+      dt,
+      this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        color: this.colorOf(p),
+        x: p.view.root.position.x,
+        y: p.view.root.position.y + (p.unit.kind === 'mech' ? 6.4 : 4),
+        z: p.view.root.position.z,
+        visible: p.unit.alive,
+        showName: !p.local,
+      })),
+    );
+  }
+
+  private updateBoard(): void {
+    const ps = [...this.players].sort((a, b) => (this.mode === 'coop' ? b.score - a.score : b.ko - a.ko || b.score - a.score));
+    const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    let html = '';
+    if (this.mode === 'alliance') html += `<div><span style="color:${SIDE_COLORS.blue}">Blue ${this.teamPoints('blue')}</span><span style="color:${SIDE_COLORS.red}">Red ${this.teamPoints('red')}</span></div>`;
+    for (const p of ps) {
+      const val = this.mode === 'coop' ? `${p.score}` : `💥 ${p.ko}`;
+      html += `<div class="${p.local ? 'me' : ''} ${p.unit.alive ? '' : 'dead'}"><span style="color:${this.colorOf(p)}">●</span><span>${esc(p.name)}</span><span>${val}</span></div>`;
+    }
+    this.hud.board(html);
+  }
+
   /* ------------------------------------------------------------------ */
   /* render                                                               */
   /* ------------------------------------------------------------------ */
@@ -873,7 +1476,9 @@ export class TitansGame {
   private render(alpha: number, frameDt: number): void {
     const dt = this.state === 'paused' ? 0 : frameDt;
     const me = this.local!;
-    const t = me.unit;
+    // knocked out online: watch a teammate (or anyone) until you're back
+    const watch = this.room && !me.unit.alive ? this.players.find((p) => !p.local && p.unit.alive && (this.mode === 'arena' || p.team === me.team)) : undefined;
+    const t = (watch ?? me).unit;
     const x = lerp(t.px, t.x, alpha),
       y = lerp(t.py, t.y, alpha),
       z = lerp(t.pz, t.z, alpha);
@@ -912,6 +1517,7 @@ export class TitansGame {
     // effects
     this.shadow.update(x, z, h, 0, this.terrain, this.r3.light.level);
     this.shadow.mesh.visible = t.alive;
+    if (this.room) this.updateTags(dt);
     this.particles.update(dt);
     this.r3.renderer.getDrawingBufferSize(this.bufSize);
     this.particles.mat.uniforms.uScale.value = this.bufSize.y / (2 * Math.tan((this.cam.camera.fov * Math.PI) / 360));
@@ -933,10 +1539,13 @@ export class TitansGame {
 
     // hud
     if (this.state === 'playing') {
-      this.hud.bar('hp', t.hp / t.spec.maxHp);
-      this.hud.bar('reload', 1 - t.reload / (RELOAD[t.kind] * t.reloadScale));
-      this.hud.bar('energy', t.energy);
-      this.hud.set('wave', this.wave ? `WAVE ${this.wave}` : 'GET READY');
+      const mu = me.unit;
+      this.hud.bar('hp', mu.hp / mu.spec.maxHp);
+      this.hud.bar('reload', 1 - mu.reload / (RELOAD[mu.kind] * mu.reloadScale));
+      this.hud.bar('energy', mu.energy);
+      const mt = Math.max(0, Math.ceil(this.matchT));
+      this.hud.set('wave', this.room && this.mode !== 'coop' ? `⏱ ${Math.floor(mt / 60)}:${String(mt % 60).padStart(2, '0')}` : this.wave ? `WAVE ${this.wave}` : 'GET READY');
+      if (this.room) this.updateBoard();
       this.hud.set('score', `${this.score}`);
       const pw: string[] = [];
       if (me.shieldT > 0) pw.push(`🛡️ ${Math.ceil(me.shieldT)}`);
@@ -946,7 +1555,7 @@ export class TitansGame {
       const b = this.boss;
       if (b) this.hud.bar('bossHp', b.hpFrac);
       const rpm = t.kind === 'mech' ? 700 + t.drive * 1300 + (t.dashing ? 1500 : 0) : 900 + Math.abs(t.drive) * 3200 + (this.input.unit.move > 0.1 ? 600 : 0) + (t.dashing ? 1200 : 0);
-      this.audio.update(rpm, t.speed, this.input.unit.move, 0, t.airborne, 0, t.kind === 'tank' ? 0.3 : 0.1);
+      this.audio.update(me.unit.alive ? rpm : 0, me.unit.speed, this.input.unit.move, 0, me.unit.airborne, 0, t.kind === 'tank' ? 0.3 : 0.1);
     }
 
     this.r3.monitor(frameDt);

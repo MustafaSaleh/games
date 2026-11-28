@@ -159,6 +159,23 @@ export class Boss implements Enemy {
     return (Math.max(0, this.knees[0]) + Math.max(0, this.knees[1]) + Math.max(0, this.core)) / this.maxHp;
   }
 
+  /** online guests: follow the host's boss state */
+  netState(k0: number, k1: number, core: number, st: number): void {
+    const was = [this.knees[0] > 0, this.knees[1] > 0];
+    this.knees[0] = k0;
+    this.knees[1] = k1;
+    this.core = core;
+    const states: State[] = ['walk', 'stomp', 'kneel', 'dying', 'dead'];
+    const next = states[st] ?? 'walk';
+    if (next !== this.state && (next === 'dying' || next === 'kneel' || next === 'stomp')) this.stateT = 0;
+    if (next !== 'dead') this.state = next;
+    for (let i = 0; i < 2; i++) if (was[i] && this.knees[i] <= 0) this.flash = 0.3;
+  }
+
+  get stateCode(): number {
+    return ['walk', 'stomp', 'kneel', 'dying', 'dead'].indexOf(this.state);
+  }
+
   get shielded(): boolean {
     return this.knees[0] > 0 || this.knees[1] > 0;
   }

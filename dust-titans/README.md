@@ -67,8 +67,8 @@ Each phase ends with something playable and deployed.
 - [x] **1. First playable:** tank in the desert arena (drive, aim, shoot), drones that fight back, explosions, health, waves, score, title screen with Mody.
 - [x] **2. Mech + Garage:** walking robot suit (strafes, jump-jets you can hold to hover, dash, stomp on landing, arm cannon), Mody in the glass cockpit, tank turbo-ram, Garage with stat bars and 5 colour schemes.
 - [x] **3. Enemies + bosses:** robot walkers (laser bursts, red-visor warning), jelly aliens (zig-zag hops, zap on touch), power-ups (repair, shield, rapid fire, triple shot), the Giant Robot every 5th wave (knees, then the shielded chest core; plasma volleys; stomp shockwaves to jump over).
-- [ ] **4. Co-op multiplayer:** online rooms (up to 4, host runs enemies) and split-screen co-op.
-- [ ] **5. PvP + alliances:** arena knockouts/respawn, teams 2 v 2 with enemy waves between, scoreboard, emojis, watching after you're out.
+- [x] **4. Co-op multiplayer:** online rooms for up to 4 (room code + share link, names and emojis only, no chat). The host runs the enemies, waves and crates; every device drives its own unit and decides when it is hit. Knocked-out players respawn next to a teammate; you watch a teammate meanwhile. *(Split-screen co-op on one device: later.)*
+- [x] **5. PvP + alliances:** *Arena battle* (everyone for themselves, 3 minutes or 10 knock-outs, crates drop from the sky) and *Alliance battle* (Blue vs Red with enemy waves, 4 minutes, points = enemies + 1000 per knock-out). Respawn after 4 s with a short shield, live scoreboard, name tags, results screen, back to the room.
 - [ ] **6. Cities:** Cairo, Riyadh, Dubai arena maps (landmark-inspired, never damaged).
 - [ ] **7. Polish:** upgrades and coins, missions, more weapons/abilities, battle music themes, effects.
 
