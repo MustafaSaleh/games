@@ -111,9 +111,9 @@ export class BattleHud {
 
   onEmote = (_i: number) => {};
 
-  /** emoji bar + scoreboard only online */
-  online(on: boolean): void {
-    this.el.emotes.style.display = on ? '' : 'none';
+  /** scoreboard in battles with others; emoji bar only online */
+  online(on: boolean, emotes = on): void {
+    this.el.emotes.style.display = emotes ? '' : 'none';
     this.el.board.style.display = on ? '' : 'none';
   }
 
@@ -164,6 +164,7 @@ export interface MenuHandlers {
   startRoom(): void;
   setMode(m: Mode): void;
   setSide(s: Side): void;
+  practice(mode: Mode, skill: number): void;
   toRoom(): void;
   pickArena(id: string): void;
   emote(i: number): void;
@@ -193,6 +194,9 @@ export class TitansMenu {
   shareUrl = '';
   mpResult: { title: string; sub: string; rows: ResultRow[]; teams?: { blue: number; red: number }; coins?: number } | null = null;
   private keep: Record<string, string> = {};
+  /** practice bots skill */
+  skill = load<number>('titans.skill', 0.25);
+  lastPractice: Mode = 'arena';
   /** solo battlefield */
   arena = load<string>('titans.arena', 'desert-bowl');
 
@@ -253,6 +257,7 @@ export class TitansMenu {
         <div class="btn-col">
           <button class="btn primary" data-act="play">▶ Play: ${arenaById(this.arena).name}<small>Survive the waves · Giant Robot every 5th wave</small></button>
           <button class="btn" data-act="arenas">🗺️ Battlefield<small>${arenaById(this.arena).icon} ${arenaById(this.arena).name}</small></button>
+          <button class="btn" data-act="practicemenu">⚔️ Practice battle<small>Arena and alliance battles against computer players</small></button>
           <button class="btn" data-act="online">👥 Play with friends<small>Co-op, arena and alliance battles online</small></button>
           <button class="btn" data-act="garage">🛠️ Garage<small>${SPECS[this.loadout.unit].name} · ${liveryById(this.loadout.livery).name}</small></button>
           <button class="btn" data-act="how">How to play</button>
@@ -313,6 +318,15 @@ export class TitansMenu {
     } else if (s === 'arenas') {
       html = `<h2>Choose a battlefield</h2><div class="tt-arenas">${ARENAS.map((a) => `<button class="tt-arena ${a.id === this.arena ? 'sel' : ''}" data-arena="${a.id}"><span>${a.icon}</span><b>${a.name}</b><small>${a.description}</small></button>`).join('')}</div>
         <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
+    } else if (s === 'practicemenu') {
+      html = `<h2>Practice battle</h2>
+        <p class="muted small">Battle computer players on ${arenaById(this.arena).icon} ${arenaById(this.arena).name}. Same rules as online.</p>
+        <div class="btn-col">
+          <button class="btn primary" data-act="prac" data-pm="arena">⚔️ Arena<small>You vs 3 bots · 3 minutes · most knock-outs wins</small></button>
+          <button class="btn" data-act="prac" data-pm="alliance">🔵🔴 Alliance<small>You + 1 bot vs 2 bots, with enemy waves</small></button>
+        </div>
+        <div class="tt-sides"><button class="btn ${this.skill < 0.5 ? 'primary' : 'ghost'}" data-skill="0.25">😊 Easy bots</button><button class="btn ${this.skill >= 0.5 ? 'primary' : 'ghost'}" data-skill="0.75">😤 Tough bots</button></div>
+        <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
     } else if (s === 'online') {
       const name = esc(this.keep['tt-name'] ?? load<string>('mp.name', ''));
       const code = esc(this.keep['tt-code'] ?? this.codeHint);
@@ -372,8 +386,13 @@ export class TitansMenu {
         ${R.teams ? `<div class="tt-teams"><span style="color:${SIDE_COLORS.blue}">Blue ${R.teams.blue}</span> · <span style="color:${SIDE_COLORS.red}">Red ${R.teams.red}</span></div>` : ''}
         <div class="tt-players">${rows}</div>
         <div class="btn-col">
-          <button class="btn primary" data-act="toroom">Back to the room</button>
-          <button class="btn ghost" data-act="leave">Leave room</button>
+          ${
+            this.room
+              ? `<button class="btn primary" data-act="toroom">Back to the room</button>
+          <button class="btn ghost" data-act="leave">Leave room</button>`
+              : `<button class="btn primary" data-act="prac" data-pm="${this.lastPractice}">Play again</button>
+          <button class="btn ghost" data-act="quit">Menu</button>`
+          }
         </div>`;
     } else if (s === 'pause') {
       html = `<h2>Paused</h2><div class="btn-col">
@@ -417,6 +436,12 @@ export class TitansMenu {
       this.h.pickArena(this.arena);
       return this.render();
     }
+    const sk = (e.target as HTMLElement).closest<HTMLElement>('[data-skill]');
+    if (sk) {
+      this.skill = +sk.dataset.skill!;
+      save('titans.skill', this.skill);
+      return this.render();
+    }
     const md = (e.target as HTMLElement).closest<HTMLElement>('[data-mode]');
     if (md) return this.h.setMode(md.dataset.mode as Mode);
     const sd = (e.target as HTMLElement).closest<HTMLElement>('[data-side]');
@@ -450,6 +475,11 @@ export class TitansMenu {
       } else if (act === 'create') this.h.createRoom(name);
       else this.h.joinRoom(code, name);
     } else if (act === 'leave') this.h.leaveRoom();
+    else if (act === 'practicemenu') this.show('practicemenu');
+    else if (act === 'prac') {
+      this.lastPractice = (t.dataset.pm as Mode) ?? 'arena';
+      this.h.practice(this.lastPractice, this.skill);
+    }
     else if (act === 'start') this.h.startRoom();
     else if (act === 'toroom') this.h.toRoom();
     else if (act === 'share') this.share();

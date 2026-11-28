@@ -35,6 +35,9 @@ import { Scout } from './units/scout';
 import { NO_UNIT_INPUT, liveryById, type Livery, type Muzzle, type Unit, type UnitInput } from './units/unit';
 import { makeUnitView, type UnitView } from './units/views';
 import { bossLevel, waveSpawns } from './waves';
+import { BOT_NAMES, Bot } from './bots';
+import { LIVERIES, UNIT_KINDS } from './units/unit';
+import { SPECIAL_IDS } from './specials';
 import { BEAM, EMP, SHIELD_TIME, SPECIALS, TOMATO_STUN, rayHit, type SpecialId } from './specials';
 
 type State = 'menu' | 'playing' | 'paused' | 'over';
@@ -59,6 +62,8 @@ export interface Player {
   side: Side;
   respawnT: number;
   special: SpecialId;
+  /** computer player (practice battles) */
+  bot?: Bot;
   specialCd: number;
   specialPrev: boolean;
   rocketsLeft: number;
@@ -141,6 +146,8 @@ export class TitansGame {
   /** online room (null = playing alone) */
   room: Room | null = null;
   mode: Mode = 'coop';
+  /** offline battle against computer players */
+  practice = false;
   private remote = new Map<string, RemotePose>();
   private eshots: number[] = [];
   private matchT = 0;
@@ -181,6 +188,7 @@ export class TitansGame {
       setMode: (m) => this.room?.setMode(m),
       setSide: (sd) => this.room?.setSide(sd),
       toRoom: () => this.toRoom(),
+      practice: (m, skill) => this.startPractice(m, skill),
       pickArena: (id) => {
         if (this.room?.isHost) this.room.setArena(id);
         else this.pickArena(id);
@@ -345,25 +353,25 @@ export class TitansGame {
       p.score = p.ko = p.respawnT = 0;
       p.specialCd = p.rocketsLeft = p.beamT = 0;
     }
-    this.matchT = this.room ? MATCH_TIME[this.mode] : 0;
+    this.matchT = this.multi ? MATCH_TIME[this.mode] : 0;
     this.overSent = false;
     this.allDownT = 0;
     const u = this.local!.unit;
     this.cam.snap(u.x, u.y, u.z, 0);
     this.wave = 0;
     this.queue = [];
-    this.waveT = this.room ? 3 : 1.5;
+    this.waveT = this.multi ? 3 : 1.5;
     this.overT = 0;
     this.hud.boss(false);
   }
 
   /** where a player starts / respawns */
   private spawnPoint(p: Player): { x: number; z: number; h: number } {
-    if (this.room && this.mode === 'arena') {
+    if (this.multi && this.mode === 'arena') {
       const a = (p.slot / 4) * Math.PI * 2 + Math.PI / 4;
       return { x: Math.sin(a) * 60, z: Math.cos(a) * 60, h: a + Math.PI };
     }
-    if (this.room && this.mode === 'alliance') {
+    if (this.multi && this.mode === 'alliance') {
       const mates = this.players.filter((q) => q.side === p.side).sort((a, b) => a.slot - b.slot);
       const k = mates.indexOf(p);
       const dir = p.side === 'blue' ? -1 : 1;
@@ -374,15 +382,21 @@ export class TitansGame {
 
   /** do enemies / waves happen in this game? */
   get enemiesOn(): boolean {
-    return !this.room || this.mode !== 'arena';
+    return !this.multi || this.mode !== 'arena';
   }
 
   /** does this device run the enemies (solo, or the online host)? */
+  /** a battle with other players (online or bots) */
+  get multi(): boolean {
+    return !!this.room || this.practice;
+  }
+
   get authority(): boolean {
     return !this.room || this.room.isHost;
   }
 
   private toMenu(): void {
+    if (this.practice) this.endPractice();
     this.state = 'menu';
     this.hud.online(false);
     this.tags.clear();
@@ -829,8 +843,7 @@ export class TitansGame {
 
   /** online end of game: the host decides */
   private checkMpOver(dt: number): void {
-    const room = this.room;
-    if (!room || !room.isHost || this.overSent) return;
+    if (!this.authority || this.overSent) return;
     let over: { title: string; sub: string } | null = null;
     if (this.mode === 'coop') {
       const down = this.players.every((p) => !p.unit.alive);
@@ -844,7 +857,7 @@ export class TitansGame {
     if (!over) return;
     this.overSent = true;
     if (this.mode !== 'coop') over = this.pvpResult();
-    room.send('over', over);
+    this.room?.send('over', over);
     this.showMpOver(over);
   }
 
@@ -880,21 +893,82 @@ export class TitansGame {
 
   /** local player knocked out online: respawn (PvP always, co-op while a teammate stands) */
   private respawnStep(dt: number): void {
+    for (const b of this.players) if (b.bot) this.respawnOne(b, dt);
     const me = this.local;
-    if (!this.room || !me || me.unit.alive || this.state !== 'playing') return;
-    const mates = this.players.filter((p) => !p.local && p.team === me.team && p.unit.alive);
+    if (!this.multi || !me || me.unit.alive || this.state !== 'playing') return;
+    this.respawnOne(me, dt);
+  }
+
+  /** knocked out: respawn (PvP always, co-op while a teammate stands) */
+  private respawnOne(p: Player, dt: number): void {
+    if (p.unit.alive || this.state !== 'playing') return;
+    const mates = this.players.filter((q) => q !== p && q.team === p.team && q.unit.alive);
     if (this.mode === 'coop' && !mates.length) {
-      me.respawnT = 6;
+      p.respawnT = 6;
       return;
     }
-    me.respawnT -= dt;
-    this.hud.set('banner', `Back in ${Math.max(1, Math.ceil(me.respawnT))}…`);
-    if (me.respawnT > 0) return;
-    const sp = this.mode === 'coop' && mates.length ? { x: mates[0].unit.x + 6, z: mates[0].unit.z, h: mates[0].unit.heading } : this.spawnPoint(me);
-    me.unit.reset(sp.x, sp.z, sp.h, this.ground);
-    if (this.mode === 'coop') me.unit.hp = me.unit.spec.maxHp * 0.6;
-    me.shieldT = 3;
-    this.hud.set('banner', '');
+    p.respawnT -= dt;
+    if (p.local) this.hud.set('banner', `Back in ${Math.max(1, Math.ceil(p.respawnT))}…`);
+    if (p.respawnT > 0) return;
+    const sp = this.mode === 'coop' && mates.length ? { x: mates[0].unit.x + 6, z: mates[0].unit.z, h: mates[0].unit.heading } : this.spawnPoint(p);
+    p.unit.reset(sp.x, sp.z, sp.h, this.ground);
+    if (this.mode === 'coop') p.unit.hp = p.unit.spec.maxHp * 0.6;
+    p.shieldT = 3;
+    if (p.local) this.hud.set('banner', '');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* practice battles (computer players)                                  */
+  /* ------------------------------------------------------------------ */
+
+  private botWorld = (() => {
+    const game = this;
+    return {
+      get radius() {
+        return game.arena.radius;
+      },
+      get players() {
+        return game.players;
+      },
+      get enemies() {
+        return game.enemies;
+      },
+      crate: (x: number, z: number) => game.pickups.nearest(x, z),
+    };
+  })();
+
+  /** offline Arena (you + 3 bots) or Alliance (you + 1 bot vs 2 bots, with enemy waves) */
+  startPractice(mode: Mode, skill: number): void {
+    this.endPractice();
+    this.practice = true;
+    this.mode = mode;
+    const me = this.local!;
+    me.team = mode === 'arena' ? 'p-me' : 'blue';
+    me.side = 'blue';
+    me.slot = 0;
+    const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+    for (let i = 1; i <= 3; i++) {
+      const side: Side = mode === 'alliance' && i >= 2 ? 'red' : 'blue';
+      const l: Loadout = { unit: UNIT_KINDS[Math.floor(Math.random() * 3)], livery: LIVERIES[(i * 2 + Math.floor(Math.random() * 5)) % LIVERIES.length].id, special: SPECIAL_IDS[Math.floor(Math.random() * SPECIAL_IDS.length)] };
+      const p = this.makePlayer('bot' + i, names[i - 1], l, false, mode === 'arena' ? 'p-bot' + i : side, i, side);
+      p.bot = new Bot(skill, i * 7 + Math.floor(Math.random() * 100));
+      this.players.push(p);
+    }
+    this.startBattle();
+    this.hud.online(true, false);
+    this.banner(mode === 'arena' ? '⚔️ Arena practice!' : '🔵 You + ally vs 🔴 Red team!', 2200);
+  }
+
+  private endPractice(): void {
+    if (!this.practice) return;
+    this.practice = false;
+    for (const p of this.players.filter((q) => q.bot)) this.removePlayer(p);
+    this.mode = 'coop';
+    const me = this.local;
+    if (me) {
+      me.team = 'player';
+      me.slot = 0;
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -964,7 +1038,7 @@ export class TitansGame {
     // ---- players ----
     for (const p of this.players) {
       const u = p.unit;
-      if (!p.local && this.room) {
+      if (!p.local && !p.bot && this.room) {
         this.applyRemote(p, dt);
         const r = p.ref;
         r.x = u.x;
@@ -976,7 +1050,7 @@ export class TitansGame {
         r.alive = playing && u.alive;
         continue;
       }
-      const ui: UnitInput = p.local && playing && u.alive ? inp.unit : NO_UNIT_INPUT;
+      const ui: UnitInput = p.bot && playing ? p.bot.think(dt, p, this.botWorld) : p.local && playing && u.alive ? inp.unit : NO_UNIT_INPUT;
       u.reloadScale = (p.rapidT > 0 ? 0.45 : 1) * (p.local ? 1 - 0.07 * this.menu.ups.reload : 1);
       u.energyMul = p.local ? 1 + 0.15 * this.menu.ups.energy : 1;
       u.step(dt, ui, ground);
@@ -1047,10 +1121,10 @@ export class TitansGame {
     this.shots.step(dt, ground, tg, this.impacts);
     for (const hit of this.impacts) this.onImpact(hit);
     this.debris.step(dt, ground);
-    const me = this.local;
-    const got = this.pickups.step(dt, this.time, ground, me ? [{ x: me.unit.x, z: me.unit.z, alive: me.unit.alive && playing }] : [], 3.2);
+    const sim = this.players.filter((p) => p.local || p.bot);
+    const got = this.pickups.step(dt, this.time, ground, sim.map((p) => ({ x: p.unit.x, z: p.unit.z, alive: p.unit.alive && playing })), 3.2);
     for (const g of got) {
-      this.applyPickup(me, g.kind);
+      this.applyPickup(sim[g.by], g.kind);
       this.room?.send('take', g.id);
     }
 
@@ -1068,7 +1142,7 @@ export class TitansGame {
     }
 
     if (playing && this.authority && this.enemiesOn) this.waves(dt);
-    if (playing && this.room?.isHost && this.mode === 'arena') {
+    if (playing && this.authority && this.multi && this.mode === 'arena') {
       this.crateT -= dt;
       if (this.crateT <= 0) {
         this.crateT = 10;
@@ -1078,12 +1152,12 @@ export class TitansGame {
         this.dropCrate(Math.sin(a) * R, this.terrain.heightAt(Math.sin(a) * R, Math.cos(a) * R) + 8, Math.cos(a) * R, k[Math.floor(Math.random() * 4)]);
       }
     }
-    if (this.room) {
+    if (this.multi) {
       if (playing) {
         this.respawnStep(dt);
         this.checkMpOver(dt);
       }
-      this.netSend();
+      if (this.room) this.netSend();
     } else if (playing && this.players.every((p) => !p.unit.alive)) {
       this.overT += dt;
       if (this.overT > 1.8) this.gameOver();
@@ -1132,7 +1206,7 @@ export class TitansGame {
       u.muzzle(this.muzzle, spreads[i]);
       const m = this.muzzle;
       if (i === 0) {
-        this.aimAssist(m, kind);
+        this.aimAssist(m, kind, p);
         vy = m.vy;
       } else m.vy = vy;
       this.shots.fire(p.team, kind, m.x, m.y, m.z, m.vx, m.vy, m.vz, p.id);
@@ -1157,15 +1231,15 @@ export class TitansGame {
   }
 
   /** bend the shot toward the enemy weak spot closest to the aim line */
-  private aimAssist(m: Muzzle, kind: ShotKind): void {
+  private aimAssist(m: Muzzle, kind: ShotKind, shooter = this.local): void {
     const sp = Math.hypot(m.vx, m.vz);
     const g = SHOTS[kind].gravity;
     let best: { x: number; y: number; z: number; vx: number; vz: number } | null = null,
       bestScore = 0.3; // ~17° off the barrel
     const pts: { x: number; y: number; z: number }[] = [];
-    const me = this.local;
+    const me = shooter;
     for (const p of this.players) {
-      if (!this.room || p.local || !p.unit.alive || p.team === me?.team) continue;
+      if (!this.multi || p === me || !p.unit.alive || p.team === me?.team) continue;
       const u = p.unit;
       const dx = u.x - m.x,
         dz = u.z - m.z;
@@ -1329,7 +1403,7 @@ export class TitansGame {
 
   hurtPlayer(p: Player | undefined, dmg: number, fromX: number, fromZ: number, by?: string, soft = false): void {
     if (!p || !p.unit.alive || this.state !== 'playing') return;
-    if (this.room && !p.local) return; // every device decides for its own unit
+    if (this.room && !p.local && !p.bot) return; // every device decides for its own unit
     const u = p.unit;
     if (p.shieldT > 0) {
       this.sparks.emit(u.x, u.y + 2, u.z, 10, 4);
@@ -1356,8 +1430,8 @@ export class TitansGame {
       this.explode(u.x, u.y + 1.5, u.z, 2.2);
       this.debris.burst(u.x, u.y + 1.5, u.z, 12, 1.4);
       const killer = by ? this.players.find((q) => q.id === by && q !== p) : undefined;
-      if (this.room) {
-        this.room.send('ko', { by: killer?.id ?? '' });
+      if (this.multi) {
+        this.room?.send('ko', { by: killer?.id ?? '' });
         if (killer) killer.ko++;
         this.koBanner(p, killer);
       } else if (p.local) this.banner('KNOCKED OUT!', 2000);
@@ -1479,7 +1553,7 @@ export class TitansGame {
       m.vx = ((m.vx - u.vx) / hs) * 34 + u.vx;
       m.vz = ((m.vz - u.vz) / hs) * 34 + u.vz;
       m.vy = 9;
-      this.aimAssist(m, 'tomato');
+      this.aimAssist(m, 'tomato', p);
       this.shots.fire(p.team, 'tomato', m.x, m.y + 0.5, m.z, m.vx, m.vy, m.vz, p.id);
       this.room?.send('shot', encodeShot('tomato', { ...m, y: m.y + 0.5 }));
       if (p.local) this.audio.whoosh();
@@ -1748,7 +1822,7 @@ export class TitansGame {
     const dt = this.state === 'paused' ? 0 : frameDt;
     const me = this.local!;
     // knocked out online: watch a teammate (or anyone) until you're back
-    const watch = this.room && !me.unit.alive ? this.players.find((p) => !p.local && p.unit.alive && (this.mode === 'arena' || p.team === me.team)) : undefined;
+    const watch = this.multi && !me.unit.alive ? this.players.find((p) => !p.local && p.unit.alive && (this.mode === 'arena' || p.team === me.team)) : undefined;
     const t = (watch ?? me).unit;
     const x = lerp(t.px, t.x, alpha),
       y = lerp(t.py, t.y, alpha),
@@ -1792,7 +1866,7 @@ export class TitansGame {
     // effects
     this.shadow.update(x, z, h, 0, this.terrain, this.r3.light.level);
     this.shadow.mesh.visible = t.alive;
-    if (this.room) this.updateTags(dt);
+    if (this.multi) this.updateTags(dt);
     this.particles.update(dt);
     this.r3.renderer.getDrawingBufferSize(this.bufSize);
     this.particles.mat.uniforms.uScale.value = this.bufSize.y / (2 * Math.tan((this.cam.camera.fov * Math.PI) / 360));
@@ -1823,8 +1897,8 @@ export class TitansGame {
       this.hud.special(sp.icon, charge);
       this.sticks.setSpecial(sp.icon, charge);
       const mt = Math.max(0, Math.ceil(this.matchT));
-      this.hud.set('wave', this.room && this.mode !== 'coop' ? `⏱ ${Math.floor(mt / 60)}:${String(mt % 60).padStart(2, '0')}` : this.wave ? `WAVE ${this.wave}` : 'GET READY');
-      if (this.room) this.updateBoard();
+      this.hud.set('wave', this.multi && this.mode !== 'coop' ? `⏱ ${Math.floor(mt / 60)}:${String(mt % 60).padStart(2, '0')}` : this.wave ? `WAVE ${this.wave}` : 'GET READY');
+      if (this.multi) this.updateBoard();
       this.hud.set('score', `${this.score}`);
       const pw: string[] = [];
       if (me.shieldT > 0) pw.push(`🛡️ ${Math.ceil(me.shieldT)}`);

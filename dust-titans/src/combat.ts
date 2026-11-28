@@ -351,6 +351,20 @@ export class Pickups {
     return id;
   }
 
+  /** closest crate to (x, z) */
+  nearest(x: number, z: number): { x: number; z: number } | null {
+    let best: { x: number; z: number } | null = null,
+      bd = Infinity;
+    for (const it of this.items) {
+      const d = (it.x - x) ** 2 + (it.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = it;
+      }
+    }
+    return best;
+  }
+
   /** someone else took it */
   remove(id: number): void {
     const i = this.items.findIndex((it) => it.id === id);
