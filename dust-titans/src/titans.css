@@ -121,3 +121,5 @@
 .tt-specials { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin: 6px 0 10px; }
 .tt-spec { padding: 6px 10px; border-radius: 12px; border: 2px solid #ffffff22; background: #ffffff0d; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
 .tt-spec.sel { border-color: #ffb52e; background: #ffb52e1f; }
+.tt-stars { font-style: normal; font-size: 11px; margin-left: 4px; }
+.tt-bigstars { font-size: 40px; text-align: center; margin: 6px 0; letter-spacing: 4px; }

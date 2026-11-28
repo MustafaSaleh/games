@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { EMOTES, HOST_ID, MODES, type Mode, type Room, type Side } from './net/room';
 import { ARENAS, arenaById } from './arena';
 import { SPECIALS, SPECIAL_IDS, specialId, type SpecialId } from './specials';
+import { MISSIONS, missionById } from './missions';
 
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -165,6 +166,9 @@ export interface MenuHandlers {
   setMode(m: Mode): void;
   setSide(s: Side): void;
   practice(mode: Mode, skill: number): void;
+  mission(id: string): void;
+  /** leave a finished battle quietly (back to the menu background) */
+  quitToMenu(): void;
   toRoom(): void;
   pickArena(id: string): void;
   emote(i: number): void;
@@ -194,6 +198,7 @@ export class TitansMenu {
   shareUrl = '';
   mpResult: { title: string; sub: string; rows: ResultRow[]; teams?: { blue: number; red: number }; coins?: number } | null = null;
   private keep: Record<string, string> = {};
+  missionResult: { id: string; next: string; win: boolean; stars: number; coins: number; time: number; name: string } | null = null;
   /** practice bots skill */
   skill = load<number>('titans.skill', 0.25);
   lastPractice: Mode = 'arena';
@@ -257,6 +262,11 @@ export class TitansMenu {
         <div class="btn-col">
           <button class="btn primary" data-act="play">▶ Play: ${arenaById(this.arena).name}<small>Survive the waves · Giant Robot every 5th wave</small></button>
           <button class="btn" data-act="arenas">🗺️ Battlefield<small>${arenaById(this.arena).icon} ${arenaById(this.arena).name}</small></button>
+          <button class="btn" data-act="missions">🎯 Missions<small>${(() => {
+            const p = load<Record<string, number>>('titans.missions', {});
+            const st = MISSIONS.reduce((a, m) => a + (p[m.id] ?? 0), 0);
+            return `${st} / ${MISSIONS.length * 3} ⭐`;
+          })()}</small></button>
           <button class="btn" data-act="practicemenu">⚔️ Practice battle<small>Arena and alliance battles against computer players</small></button>
           <button class="btn" data-act="online">👥 Play with friends<small>Co-op, arena and alliance battles online</small></button>
           <button class="btn" data-act="garage">🛠️ Garage<small>${SPECS[this.loadout.unit].name} · ${liveryById(this.loadout.livery).name}</small></button>
@@ -318,6 +328,23 @@ export class TitansMenu {
     } else if (s === 'arenas') {
       html = `<h2>Choose a battlefield</h2><div class="tt-arenas">${ARENAS.map((a) => `<button class="tt-arena ${a.id === this.arena ? 'sel' : ''}" data-arena="${a.id}"><span>${a.icon}</span><b>${a.name}</b><small>${a.description}</small></button>`).join('')}</div>
         <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
+    } else if (s === 'missions') {
+      const prog = load<Record<string, number>>('titans.missions', {});
+      const star = (n: number) => '⭐'.repeat(n) + '☆'.repeat(3 - n);
+      html = `<h2>Missions</h2><div class="tt-arenas">${MISSIONS.map((m) => `<button class="tt-arena" data-mission="${m.id}"><span>${m.icon}</span><b>${m.name} <i class="tt-stars">${star(prog[m.id] ?? 0)}</i></b><small>${arenaById(m.arena).icon} ${arenaById(m.arena).name} · ${m.brief}</small></button>`).join('')}</div>
+        <p class="muted small">⭐ finish · ⭐⭐ with half your armour left · ⭐⭐⭐ also quickly. Uses your Garage unit.</p>
+        <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
+    } else if (s === 'missionover' && this.missionResult) {
+      const r = this.missionResult;
+      html = `<h2 class="${r.win ? 'record' : ''}">${r.win ? 'Mission complete!' : 'Mission failed'}</h2>
+        <div class="result-line">${esc(r.name)}</div>
+        ${r.win ? `<div class="tt-bigstars">${'⭐'.repeat(r.stars)}${'☆'.repeat(3 - r.stars)}</div><div class="result-line">Time ${Math.floor(r.time / 60)}:${String(Math.floor(r.time % 60)).padStart(2, '0')}</div>` : `<div class="result-line">${esc(missionById(r.id)?.brief ?? '')}</div>`}
+        ${r.coins ? `<div class="tt-earned">+${r.coins} 🪙</div>` : ''}
+        <div class="btn-col">
+          ${r.win && r.next ? `<button class="btn primary" data-mission="${r.next}">Next mission ▶</button>` : ''}
+          <button class="btn ${r.win && r.next ? '' : 'primary'}" data-mission="${r.id}">${r.win ? 'Play again' : 'Try again'}</button>
+          <button class="btn ghost" data-act="missions">Missions</button>
+        </div>`;
     } else if (s === 'practicemenu') {
       html = `<h2>Practice battle</h2>
         <p class="muted small">Battle computer players on ${arenaById(this.arena).icon} ${arenaById(this.arena).name}. Same rules as online.</p>
@@ -436,6 +463,8 @@ export class TitansMenu {
       this.h.pickArena(this.arena);
       return this.render();
     }
+    const ms = (e.target as HTMLElement).closest<HTMLElement>('[data-mission]');
+    if (ms) return this.h.mission(ms.dataset.mission!);
     const sk = (e.target as HTMLElement).closest<HTMLElement>('[data-skill]');
     if (sk) {
       this.skill = +sk.dataset.skill!;
@@ -476,6 +505,10 @@ export class TitansMenu {
       else this.h.joinRoom(code, name);
     } else if (act === 'leave') this.h.leaveRoom();
     else if (act === 'practicemenu') this.show('practicemenu');
+    else if (act === 'missions') {
+      this.h.quitToMenu();
+      this.show('missions');
+    }
     else if (act === 'prac') {
       this.lastPractice = (t.dataset.pm as Mode) ?? 'arena';
       this.h.practice(this.lastPractice, this.skill);

@@ -36,6 +36,8 @@ import { NO_UNIT_INPUT, liveryById, type Livery, type Muzzle, type Unit, type Un
 import { makeUnitView, type UnitView } from './units/views';
 import { bossLevel, waveSpawns } from './waves';
 import { BOT_NAMES, Bot } from './bots';
+import { Guarded, MissionRun, missionById, MISSIONS, type MissionHost } from './missions';
+import { Beacon } from './enemies/beacon';
 import { LIVERIES, UNIT_KINDS } from './units/unit';
 import { SPECIAL_IDS } from './specials';
 import { BEAM, EMP, SHIELD_TIME, SPECIALS, TOMATO_STUN, rayHit, type SpecialId } from './specials';
@@ -148,6 +150,43 @@ export class TitansGame {
   mode: Mode = 'coop';
   /** offline battle against computer players */
   practice = false;
+  mission: MissionRun | null = null;
+  private missionHost: MissionHost = (() => {
+    const g = this;
+    return {
+      get scene() {
+        return g.r3.scene;
+      },
+      get radius() {
+        return g.arena.radius;
+      },
+      heightAt: (x: number, z: number) => g.terrain.heightAt(x, z),
+      spawn: (kind: EnemyKind) => g.spawn(kind, undefined, undefined, kind === 'boss' ? 2 : undefined),
+      get enemies() {
+        return g.enemies;
+      },
+      banner: (t: string, ms: number) => g.banner(t, ms),
+      dropCrate: (x: number, y: number, z: number, k: PickupKind) => g.dropCrate(x, y, z, k),
+      player: () => {
+        const u = g.local!.unit;
+        return { x: u.x, z: u.z, alive: u.alive };
+      },
+      addEnemy: (e: Enemy) => {
+        g.enemies.push(e);
+        g.r3.scene.add(e.mesh);
+      },
+      beacon: (x: number, z: number) => {
+        const b = new Beacon('beacon' + g.nextId++);
+        b.x = x;
+        b.z = z;
+        b.y = g.terrain.heightAt(x, z);
+        g.enemies.push(b);
+        g.r3.scene.add(b.mesh);
+        return b;
+      },
+      cratesOnField: (k: PickupKind) => g.pickups.countKind(k),
+    };
+  })();
   private remote = new Map<string, RemotePose>();
   private eshots: number[] = [];
   private matchT = 0;
@@ -175,7 +214,11 @@ export class TitansGame {
     this.sticks = new TouchSticks(ui, this.input);
     this.tags = new Tags(ui);
     this.menu = new TitansMenu(ui, {
-      play: () => this.startBattle(),
+      play: () => {
+        this.endPractice();
+        this.loadArena(arenaById(this.menu.arena));
+        this.startBattle();
+      },
       loadoutChanged: (l) => {
         this.loadout = { ...l };
         if (this.state === 'menu') this.setLocalPlayer();
@@ -189,6 +232,10 @@ export class TitansGame {
       setSide: (sd) => this.room?.setSide(sd),
       toRoom: () => this.toRoom(),
       practice: (m, skill) => this.startPractice(m, skill),
+      mission: (id) => this.startMission(id),
+      quitToMenu: () => {
+        if (this.state !== 'menu') this.toMenu();
+      },
       pickArena: (id) => {
         if (this.room?.isHost) this.room.setArena(id);
         else this.pickArena(id);
@@ -232,7 +279,10 @@ export class TitansGame {
         this.shots.fire('enemy', kind, x, y, z, vx, vy, vz);
         if (this.room) this.eshots.push(...encodeShot(kind, { x, y, z, vx, vy, vz }));
       },
-      hurt: (i, dmg, fx, fz) => this.hurtPlayer(this.players[i], dmg, fx, fz),
+      hurt: (i, dmg, fx, fz) => {
+        if (i < this.players.length) this.hurtPlayer(this.players[i], dmg, fx, fz);
+        else this.mission?.guarded[i - this.players.length]?.hurt(dmg);
+      },
       fx: (kind, x, y, z, size) => this.enemyFx(kind, x, y, z, size ?? 1),
     };
     this.loop = new Loop(
@@ -338,6 +388,8 @@ export class TitansGame {
   }
 
   private resetBattle(): void {
+    this.mission?.dispose();
+    this.mission = null;
     this.clearEnemies();
     this.shots.clear();
     this.debris.clear();
@@ -917,6 +969,52 @@ export class TitansGame {
     if (p.local) this.hud.set('banner', '');
   }
 
+
+  /* ------------------------------------------------------------------ */
+  /* missions                                                             */
+  /* ------------------------------------------------------------------ */
+
+  startMission(id: string): void {
+    const def = missionById(id);
+    if (!def) return;
+    this.endPractice();
+    this.loadArena(arenaById(def.arena));
+    this.startBattle();
+    this.mission = new MissionRun(def, this.missionHost);
+    this.banner(`${def.icon} ${def.name}`, 2200);
+  }
+
+  private missionStep(dt: number): void {
+    const m = this.mission!;
+    m.step(dt);
+    if (!m.outcome) return;
+    this.overT += dt;
+    if (this.overT < (m.outcome === 'win' ? 1.2 : 1.8)) return;
+    this.missionEnd(m);
+  }
+
+  private missionEnd(m: MissionRun): void {
+    this.state = 'over';
+    const me = this.local!;
+    const win = m.outcome === 'win';
+    const stars = win ? m.stars(me.unit.hp / me.unit.spec.maxHp) : 0;
+    const prog = load<Record<string, number>>('titans.missions', {});
+    const before = prog[m.def.id] ?? 0;
+    const coins = win ? this.menu.earn(before ? 40 + Math.max(0, stars - before) * 50 : 150 + stars * 50) : this.menu.earn(10);
+    if (stars > before) {
+      prog[m.def.id] = stars;
+      save('titans.missions', prog);
+    }
+    const i = MISSIONS.indexOf(m.def);
+    this.menu.missionResult = { id: m.def.id, next: MISSIONS[i + 1]?.id ?? '', win, stars, coins, time: m.time, name: `${m.def.icon} ${m.def.name}` };
+    this.hud.show(false);
+    this.sticks.show(false);
+    this.audio.setActive(false);
+    if (win) this.audio.checkpoint(true);
+    this.menu.show('missionover');
+    this.updateMusic();
+  }
+
   /* ------------------------------------------------------------------ */
   /* practice battles (computer players)                                  */
   /* ------------------------------------------------------------------ */
@@ -940,6 +1038,7 @@ export class TitansGame {
   /** offline Arena (you + 3 bots) or Alliance (you + 1 bot vs 2 bots, with enemy waves) */
   startPractice(mode: Mode, skill: number): void {
     this.endPractice();
+    this.loadArena(arenaById(this.menu.arena));
     this.practice = true;
     this.mode = mode;
     const me = this.local!;
@@ -975,10 +1074,10 @@ export class TitansGame {
   /* enemies                                                              */
   /* ------------------------------------------------------------------ */
 
-  spawn(kind: EnemyKind, angle?: number, forceId?: string): Enemy {
+  spawn(kind: EnemyKind, angle?: number, forceId?: string, level?: number): Enemy {
     const id = forceId ?? kind + this.nextId++;
     const seed = this.nextId;
-    const e: Enemy = kind === 'drone' ? new Drone(id, this.droneParts, seed) : kind === 'walker' ? new Walker(id, seed) : kind === 'alien' ? new Alien(id, seed) : new Boss(id, bossLevel(this.wave));
+    const e: Enemy = kind === 'drone' ? new Drone(id, this.droneParts, seed) : kind === 'walker' ? new Walker(id, seed) : kind === 'alien' ? new Alien(id, seed) : kind === 'beacon' ? new Beacon(id) : new Boss(id, level ?? bossLevel(this.wave));
     const me = this.local?.unit;
     // spawn away from the players (boss: on the far side)
     let a = angle ?? Math.random() * Math.PI * 2;
@@ -1096,6 +1195,7 @@ export class TitansGame {
 
     // ---- enemies ----
     this.ctx.players = this.players.map((p) => p.ref);
+    if (this.mission) this.ctx.players.push(...this.mission.ref);
     for (const e of this.enemies) {
       if (e.stunT && e.stunT > 0) {
         e.stunT -= dt;
@@ -1116,6 +1216,7 @@ export class TitansGame {
       tg.push({ id: p.id, team: p.team, x: u.x, y: u.y + u.spec.hitHeight, z: u.z, r: u.spec.hitR, alive: u.alive && playing, owner: p });
     }
     for (const e of this.enemies) e.targets(tg);
+    if (this.mission) for (const g of this.mission.guarded) tg.push(g.target());
     for (const p of this.players) if (p.beamT > 0) this.beamStep(p, dt);
     this.updateRings(dt);
     this.shots.step(dt, ground, tg, this.impacts);
@@ -1141,7 +1242,8 @@ export class TitansGame {
       }
     }
 
-    if (playing && this.authority && this.enemiesOn) this.waves(dt);
+    if (playing && this.mission) this.missionStep(dt);
+    else if (playing && this.authority && this.enemiesOn) this.waves(dt);
     if (playing && this.authority && this.multi && this.mode === 'arena') {
       this.crateT -= dt;
       if (this.crateT <= 0) {
@@ -1158,7 +1260,7 @@ export class TitansGame {
         this.checkMpOver(dt);
       }
       if (this.room) this.netSend();
-    } else if (playing && this.players.every((p) => !p.unit.alive)) {
+    } else if (playing && !this.mission && this.players.every((p) => !p.unit.alive)) {
       this.overT += dt;
       if (this.overT > 1.8) this.gameOver();
     }
@@ -1334,7 +1436,9 @@ export class TitansGame {
         this.sparks.emit(hit.x, hit.y, hit.z, 12, 5);
         this.puff(hit.x, hit.y, hit.z, 6, hit.kind === 'laser' ? [1, 0.4, 0.4] : [1, 0.45, 0.9], 0.9);
       }
-      const direct = hit.target?.owner as Player | undefined;
+      const owner = hit.target?.owner;
+      if (owner instanceof Guarded) owner.hurt(cfg.damage);
+      const direct = owner instanceof Guarded ? undefined : (owner as Player | undefined);
       if (direct) this.hurtPlayer(direct, cfg.damage, hit.x, hit.z);
       if (cfg.splash > 0)
         for (const p of this.players) {
@@ -1391,6 +1495,14 @@ export class TitansGame {
 
   private applyPickup(p: Player | undefined, kind: PickupKind): void {
     if (!p) return;
+    if (kind === 'supply') {
+      this.mission?.collect();
+      if (p.local) {
+        this.audio.pickup();
+        this.banner(`📦 ${this.mission?.collected ?? 0} / 10`, 900);
+      }
+      return;
+    }
     if (kind === 'repair') p.unit.hp = Math.min(p.unit.spec.maxHp, p.unit.hp + 30);
     else if (kind === 'shield') p.shieldT = PICKUPS.shield.time;
     else if (kind === 'rapid') p.rapidT = PICKUPS.rapid.time;
@@ -1880,6 +1992,7 @@ export class TitansGame {
     );
     this.shots.sync(this.time);
     for (const e of this.enemies) e.sync(dt, this.time, this.ctx);
+    if (this.mission) for (const g of this.mission.guarded) g.sync(dt, this.time, this.mission.heading);
     this.aimMarker.visible = this.state === 'playing' && t.alive && this.input.aimVisible;
     if (this.aimMarker.visible) {
       const a = this.input.aimPoint;
@@ -1896,8 +2009,9 @@ export class TitansGame {
       const charge = 1 - me.specialCd / sp.cooldown;
       this.hud.special(sp.icon, charge);
       this.sticks.setSpecial(sp.icon, charge);
+      if (this.mission) this.hud.set('wave', this.mission.objective());
       const mt = Math.max(0, Math.ceil(this.matchT));
-      this.hud.set('wave', this.multi && this.mode !== 'coop' ? `⏱ ${Math.floor(mt / 60)}:${String(mt % 60).padStart(2, '0')}` : this.wave ? `WAVE ${this.wave}` : 'GET READY');
+      if (!this.mission) this.hud.set('wave', this.multi && this.mode !== 'coop' ? `⏱ ${Math.floor(mt / 60)}:${String(mt % 60).padStart(2, '0')}` : this.wave ? `WAVE ${this.wave}` : 'GET READY');
       if (this.multi) this.updateBoard();
       this.hud.set('score', `${this.score}`);
       const pw: string[] = [];

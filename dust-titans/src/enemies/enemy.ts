@@ -2,7 +2,7 @@ import type * as THREE from 'three';
 import type { ShotKind, Target } from '../combat';
 import type { Ground } from '../units/unit';
 
-export type EnemyKind = 'drone' | 'walker' | 'alien' | 'boss';
+export type EnemyKind = 'drone' | 'walker' | 'alien' | 'boss' | 'beacon';
 
 /** what enemies can see of a player */
 export interface PlayerRef {

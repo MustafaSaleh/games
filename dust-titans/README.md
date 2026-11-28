@@ -71,7 +71,8 @@ Each phase ends with something playable and deployed.
 - [x] **5. PvP + alliances:** *Arena battle* (everyone for themselves, 3 minutes or 10 knock-outs, crates drop from the sky) and *Alliance battle* (Blue vs Red with enemy waves, 4 minutes, points = enemies + 1000 per knock-out). Respawn after 4 s with a short shield, live scoreboard, name tags, results screen, back to the room.
 - [x] **6. Cities + more arenas:** 8 battlefields. **Cairo · Nile Bank** (the Nile winds through: wade or jump; palms, sailboats, market stalls; pyramids, a lotus tower, minarets and domes on the horizon), **Riyadh · Edge of the World** (a plateau with a ramp: robot suits jump up, tanks drive up; sky-bridge tower and gold-sphere tower), **Dubai · Marina Nights** (night, neon towers, beach and shallow sea, the super-tall stepped tower, the sail hotel, the palm island), plus Desert Bowl, Forest Clearing, Frozen Lake, Redwood Grove, Ghost Town. Landmarks stand outside the arena and shots that leave the arena vanish, so they're never damaged.
 - [x] **7. Polish (first pass):** coins from every battle, Garage upgrades (armour, reload, energy; 3 levels each), music per arena, night lighting, water splashes.
-- [ ] **Next ideas:** split-screen co-op, missions (escort a truck across Ghost Bay, defend a market in Cairo), more weapons (laser, rocket swarm, EMP, shield bubble), the Scout unit (Dust Rally cars with a mini turret), the Tomato cannon silly mode, offline bot players for Arena practice.
+- [x] **8. More to play:** the **Scout** (a Dust Rally buggy with a mini-gun, nitro), **special weapons** picked in the Garage (rocket swarm, laser beam, EMP pulse, shield bubble, **tomato cannon**), **practice battles** against computer players (Arena vs 3 bots, Alliance with 1 bot ally vs 2 bots; easy / tough), and **5 missions** with stars (Water truck escort in Ghost Town, Defend the market in Cairo, Alien beacon in Riyadh, Night of the Giant in Dubai, Supply run on the Frozen Lake).
+- [ ] **Next ideas:** split-screen co-op, bots in online rooms, more missions, a mission map / campaign, more bosses.
 
 ## Mech design: image prompt
 
@@ -111,6 +112,6 @@ Movement is screen-relative: push up and you go up the screen. The tank turns it
 
 | | |
 |---|---|
-| Keyboard + mouse | WASD / arrows move, mouse aims, click / F fires, Space jump-jets (hold to hover), Shift dash (robot) / turbo ram (tank), C camera, M music, Esc pause |
-| Gamepad | Left stick move, right stick aim, RT / RB fire, A jump, B / LB dash, Back camera |
-| Touch | Left thumb: move joystick. Right thumb: aim joystick (fires while pushed). JUMP / DASH (TURBO on the tank) buttons |
+| Keyboard + mouse | WASD / arrows move, mouse aims, click / F fires, Q / E special weapon, Space jump-jets (hold to hover), Shift dash (robot) / turbo ram (tank) / nitro (scout), C camera, M music, Esc pause |
+| Gamepad | Left stick move, right stick aim, RT / RB fire, Y / X special, A jump, B / LB dash, Back camera |
+| Touch | Left thumb: move joystick. Right thumb: aim joystick (fires while pushed). JUMP / DASH (TURBO / NITRO) and SPECIAL buttons |

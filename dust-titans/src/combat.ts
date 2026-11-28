@@ -301,13 +301,14 @@ export class Debris {
   }
 }
 
-export type PickupKind = 'repair' | 'shield' | 'rapid' | 'triple';
+export type PickupKind = 'repair' | 'shield' | 'rapid' | 'triple' | 'supply';
 
 export const PICKUPS: Record<PickupKind, { color: number; emissive: number; label: string; time: number }> = {
   repair: { color: 0x35c46a, emissive: 0x0b4a22, label: '🔧 Repaired!', time: 0 },
   shield: { color: 0x4fb3ff, emissive: 0x0b2a4a, label: '🛡️ Shield!', time: 8 },
   rapid: { color: 0xffd23a, emissive: 0x4a3a0b, label: '⚡ Rapid fire!', time: 8 },
   triple: { color: 0xff7a3a, emissive: 0x4a1a0b, label: '🔱 Triple shot!', time: 8 },
+  supply: { color: 0xffd23a, emissive: 0x6a4a0b, label: '📦 Got one!', time: 0 },
 };
 
 /** Power-up crates dropped by destroyed enemies. */
@@ -347,8 +348,12 @@ export class Pickups {
     }
     g.position.set(x, y, z);
     this.group.add(g);
-    this.items.push({ id, kind, x, y, z, mesh: g, life: 25 });
+    this.items.push({ id, kind, x, y, z, mesh: g, life: kind === 'supply' ? 60 : 25 });
     return id;
+  }
+
+  countKind(kind: PickupKind): number {
+    return this.items.filter((it) => it.kind === kind).length;
   }
 
   /** closest crate to (x, z) */
