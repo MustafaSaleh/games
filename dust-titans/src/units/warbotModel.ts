@@ -31,6 +31,8 @@ export interface WarbotRig {
   mixer: THREE.AnimationMixer;
   clips: Map<string, THREE.AnimationClip>;
   bones: Map<string, THREE.Bone>;
+  /** bind-pose rotations (the mesh as modelled: gatling and fist straight) */
+  rest: Map<THREE.Bone, THREE.Quaternion>;
   materials: THREE.Material[];
 }
 
@@ -39,10 +41,14 @@ export function makeWarbotRig(gltf: GLTF, tint: number, amount: number): WarbotR
   const model = cloneSkinned(gltf.scene);
   const bones = new Map<string, THREE.Bone>();
   const materials: THREE.Material[] = [];
+  const rest = new Map<THREE.Bone, THREE.Quaternion>();
   const tintC = new THREE.Color(0xffffff).lerp(new THREE.Color(tint), amount);
   model.traverse((o) => {
     const b = o as THREE.Bone;
-    if (b.isBone) bones.set(b.name.replace(/^mixamorig:?/, ''), b);
+    if (b.isBone) {
+      bones.set(b.name.replace(/^mixamorig:?/, ''), b);
+      rest.set(b, b.quaternion.clone());
+    }
     const m = o as THREE.Mesh;
     if (m.isMesh) {
       m.frustumCulled = false;
@@ -71,5 +77,5 @@ export function makeWarbotRig(gltf: GLTF, tint: number, amount: number): WarbotR
   model.position.set(-hips.x * s, -box.min.y * s, -hips.z * s);
   model.scale.multiplyScalar(s);
   const clips = new Map(gltf.animations.map((c) => [c.name, c]));
-  return { root: holder, mixer: new THREE.AnimationMixer(model), clips, bones, materials };
+  return { root: holder, mixer: new THREE.AnimationMixer(model), clips, bones, rest, materials };
 }

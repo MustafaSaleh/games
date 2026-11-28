@@ -322,8 +322,9 @@ const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
 const _v = new THREE.Vector3();
-/** the gatling points slightly down at the ground ahead (y per 1 m forward) */
-const GUN_PITCH = 0.22;
+const RIGID = ['RightForeArm', 'RightHand', 'LeftHand'];
+/** forearm tilt that makes the gatling barrels level (y per 1 m forward) */
+const GUN_PITCH = -0.47;
 /** Warbot model timing: the moment the slam clip hits the ground (s), the unit's wind-up, and
  *  how long the slam pose holds after the hit; walk / run clip speeds at timeScale 1 (m/s) */
 const SLAM_IMPACT = 1.72;
@@ -618,6 +619,13 @@ export class WarbotView implements UnitView {
     if (walk) walk.timeScale = clamp(sp / WALK_SPEED, 0.5, 1.8);
     if (run) run.timeScale = clamp(sp / RUN_SPEED, 0.6, 1.5);
     rig.mixer.update(dt);
+    // the gatling and the fist are skinned over the elbow and wrist: bending those joints bends
+    // the gun barrels, so keep them as modelled and move the arms only from the shoulders
+    for (const name of RIGID) {
+      const b = rig.bones.get(name);
+      const q = b && rig.rest.get(b);
+      if (b && q) b.quaternion.copy(q);
+    }
     // hold the gatling level and pointing forward (the clips let it hang), except while slamming
     this.gunHold += ((slamW > 0.05 ? 0 : 1) - this.gunHold) * Math.min(1, dt * 10);
     const ua = rig.bones.get('RightArm'),
