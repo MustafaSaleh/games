@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { clamp } from '@engine/core/math';
 import { COMBAT, type Target } from '../combat';
-import type { Ground } from '../units/tank';
+import type { Ground } from '../units/unit';
+import { nearestPlayer, type DamageResult, type Enemy, type EnemyCtx } from './enemy';
 
 /** Drone tuning. */
 export const DRONE = {
@@ -17,7 +18,9 @@ export const DRONE = {
 };
 
 /** Small flying alien drone: orbits the player at a distance and lobs glowing orbs. */
-export class Drone implements Target {
+export class Drone implements Target, Enemy {
+  readonly kind = 'drone' as const;
+  readonly score = 100;
   readonly team = 'enemy' as const;
   readonly r = DRONE.radius;
   x = 0;
@@ -71,10 +74,15 @@ export class Drone implements Target {
     return this.hp > 0;
   }
 
+  /** hit spheres point back at their enemy */
+  get owner(): this {
+    return this;
+  }
+
   /**
    * AI step. `fire(x,y,z,vx,vy,vz)` launches an orb. `others` keeps drones apart.
    */
-  step(dt: number, ground: Ground, player: { x: number; y: number; z: number; vx: number; vz: number; alive: boolean }, others: readonly Drone[], fire: (x: number, y: number, z: number, vx: number, vy: number, vz: number) => void): void {
+  step(dt: number, ground: Ground, player: { x: number; y: number; z: number; vx: number; vz: number; alive: boolean }, others: readonly { x: number; z: number; alive: boolean }[], fire: (x: number, y: number, z: number, vx: number, vy: number, vz: number) => void): void {
     this.t += dt;
     this.hitFlash = Math.max(0, this.hitFlash - dt);
     const dx = player.x - this.x,
@@ -124,8 +132,32 @@ export class Drone implements Target {
     }
   }
 
+  update(dt: number, ctx: EnemyCtx): void {
+    const n = nearestPlayer(ctx, this.x, this.z);
+    const f = ctx.players[0];
+    const p = n?.p ?? { x: f?.x ?? 0, y: f?.y ?? 0, z: f?.z ?? 0, vx: 0, vz: 0, alive: false };
+    this.step(dt, ctx.ground, p, ctx.enemies, (x, y, z, vx, vy, vz) => ctx.fire('orb', x, y, z, vx, vy, vz));
+  }
+
+  targets(out: Target[]): void {
+    out.push(this);
+  }
+
+  damage(_t: Target, dmg: number): DamageResult {
+    this.hp -= dmg;
+    this.hitFlash = 0.15;
+    return this.hp > 0 ? 'hit' : 'killed';
+  }
+
+  dispose(): void {
+    this.mesh.removeFromParent();
+    (this.eye.material as THREE.Material).dispose();
+  }
+
   /** visuals: face the player, spin rotors, tilt with speed, glow before firing */
-  sync(player: { x: number; z: number }): void {
+  sync(_dt: number, _time: number, ctx: EnemyCtx | { x: number; z: number }): void {
+    const n = 'players' in ctx ? (nearestPlayer(ctx, this.x, this.z)?.p ?? ctx.players[0]) : ctx;
+    const player = n ?? { x: this.x, z: this.z + 1 };
     const m = this.mesh;
     m.position.set(this.x, this.y, this.z);
     m.rotation.y = Math.atan2(player.x - this.x, player.z - this.z);

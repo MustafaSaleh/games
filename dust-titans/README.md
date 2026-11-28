@@ -2,7 +2,7 @@
 
 A kid-friendly tank & robot-suit battle game, built on the **Dust Rally** engine (same repository, same style, same multiplayer). You and your friends pilot tanks and giant robot suits to defend famous cities from an alien-machine invasion, team up against waves of drones, robots and giant bosses, or test your skills against each other in arena battles. **Mody (#08)** is the pilot.
 
-**Play:** https://mustafasaleh.github.io/games/dust-titans/ (from phase 1 on)
+**Play:** https://mustafasaleh.github.io/games/dust-titans/
 
 ---
 
@@ -65,12 +65,13 @@ Each phase ends with something playable and deployed.
 
 - [x] **0. Shared engine:** npm workspace at the repo root, `@engine` alias, CI builds every game; Dust Rally unchanged.
 - [x] **1. First playable:** tank in the desert arena (drive, aim, shoot), drones that fight back, explosions, health, waves, score, title screen with Mody.
-- [ ] **2. Mech + Garage:** walking robot suit with jump-jets and dash (procedural walk like Mody's animations), Mody climbs in, unit garage with stats and liveries.
-- [ ] **3. Enemies + bosses:** robot walkers, aliens, power-ups, first Giant Robot boss with breakable weak points.
-- [ ] **4. Co-op multiplayer:** online rooms (up to 4, host runs enemies) and split-screen co-op.
-- [ ] **5. PvP + alliances:** arena knockouts/respawn, teams 2 v 2 with enemy waves between, scoreboard, emojis, watching after you're out.
-- [ ] **6. Cities:** Cairo, Riyadh, Dubai arena maps (landmark-inspired, never damaged).
-- [ ] **7. Polish:** upgrades and coins, missions, more weapons/abilities, battle music themes, effects.
+- [x] **2. Mech + Garage:** walking robot suit (strafes, jump-jets you can hold to hover, dash, stomp on landing, arm cannon), Mody in the glass cockpit, tank turbo-ram, Garage with stat bars and 5 colour schemes.
+- [x] **3. Enemies + bosses:** robot walkers (laser bursts, red-visor warning), jelly aliens (zig-zag hops, zap on touch), power-ups (repair, shield, rapid fire, triple shot), the Giant Robot every 5th wave (knees, then the shielded chest core; plasma volleys; stomp shockwaves to jump over).
+- [x] **4. Co-op multiplayer:** online rooms for up to 4 (room code + share link, names and emojis only, no chat). The host runs the enemies, waves and crates; every device drives its own unit and decides when it is hit. Knocked-out players respawn next to a teammate; you watch a teammate meanwhile. *(Split-screen co-op on one device: later.)*
+- [x] **5. PvP + alliances:** *Arena battle* (everyone for themselves, 3 minutes or 10 knock-outs, crates drop from the sky) and *Alliance battle* (Blue vs Red with enemy waves, 4 minutes, points = enemies + 1000 per knock-out). Respawn after 4 s with a short shield, live scoreboard, name tags, results screen, back to the room.
+- [x] **6. Cities + more arenas:** 8 battlefields. **Cairo · Nile Bank** (the Nile winds through: wade or jump; palms, sailboats, market stalls; pyramids, a lotus tower, minarets and domes on the horizon), **Riyadh · Edge of the World** (a plateau with a ramp: robot suits jump up, tanks drive up; sky-bridge tower and gold-sphere tower), **Dubai · Marina Nights** (night, neon towers, beach and shallow sea, the super-tall stepped tower, the sail hotel, the palm island), plus Desert Bowl, Forest Clearing, Frozen Lake, Redwood Grove, Ghost Town. Landmarks stand outside the arena and shots that leave the arena vanish, so they're never damaged.
+- [x] **7. Polish (first pass):** coins from every battle, Garage upgrades (armour, reload, energy; 3 levels each), music per arena, night lighting, water splashes.
+- [ ] **Next ideas:** split-screen co-op, missions (escort a truck across Ghost Bay, defend a market in Cairo), more weapons (laser, rocket swarm, EMP, shield bubble), the Scout unit (Dust Rally cars with a mini turret), the Tomato cannon silly mode, offline bot players for Arena practice.
 
 ## Mech design: image prompt
 
@@ -104,10 +105,12 @@ npm test -w dust-titans
 npm run build -w dust-titans
 ```
 
-## Controls (phase 1)
+## Controls
+
+Movement is screen-relative: push up and you go up the screen. The tank turns its hull and drives; the robot suit walks straight there.
 
 | | |
 |---|---|
-| Keyboard + mouse | W/S drive, A/D turn the hull, mouse aims the turret, click or Space fires, C camera, M music, Esc pause |
-| Gamepad | Left stick drive, right stick aim, RT fire |
-| Touch | Left thumb: drive joystick. Right thumb: aim joystick (fires while pushed) |
+| Keyboard + mouse | WASD / arrows move, mouse aims, click / F fires, Space jump-jets (hold to hover), Shift dash (robot) / turbo ram (tank), C camera, M music, Esc pause |
+| Gamepad | Left stick move, right stick aim, RT / RB fire, A jump, B / LB dash, Back camera |
+| Touch | Left thumb: move joystick. Right thumb: aim joystick (fires while pushed). JUMP / DASH (TURBO on the tank) buttons |

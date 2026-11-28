@@ -1,10 +1,11 @@
 import { SURFACES } from '@engine/config/surfaces';
 import { clamp, wrapAngle } from '@engine/core/math';
 import { resolveCircleColliders } from '@engine/physics/collisions';
-import { ColliderHits, makeGroundSample, type Terrain } from '@engine/world/terrain';
+import { ColliderHits, makeGroundSample } from '@engine/world/terrain';
+import type { Ground, Muzzle, Unit, UnitInput, UnitSpec } from './unit';
 
-/** Ground interface a unit needs (Terrain implements it; tests use a mock). */
-export type Ground = Pick<Terrain, 'sample' | 'heightAt' | 'queryColliders'>;
+export type { Ground, UnitInput } from './unit';
+export { NO_UNIT_INPUT } from './unit';
 
 /** Tank tuning. Units: metres, seconds, radians. */
 export const TANK = {
@@ -22,26 +23,38 @@ export const TANK = {
   shellSpeed: 70,
   muzzle: 3.4, // barrel length from the turret pivot
   turretHeight: 2.0,
+  /** turbo ram: speed boost while dash is held, uses energy */
+  turboSpeed: 24,
+  turboAccel: 30,
+  turboDrain: 0.7, // energy / s
+  energyRegen: 0.22,
 };
 
-/**
- * What a unit is asked to do this step. Movement is "screen-relative": the player points
- * where they want to go (a world direction); the tank turns its hull toward it and drives.
- */
-export interface UnitInput {
-  /** desired move direction (world x/z) and strength 0..1 */
-  moveX: number;
-  moveZ: number;
-  move: number;
-  /** turret aim: world yaw, or null to keep the current aim */
-  aimYaw: number | null;
-  fire: boolean;
-}
-
-export const NO_UNIT_INPUT: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false };
+export const TANK_SPEC: UnitSpec = {
+  kind: 'tank',
+  name: 'Tank',
+  blurb: 'Heavy armour and a big cannon. Turbo to ram through anything.',
+  maxHp: TANK.maxHp,
+  radius: TANK.radius,
+  mass: TANK.mass,
+  hitHeight: 1.2,
+  shot: 'shell',
+  bars: { armour: 0.95, speed: 0.55, firepower: 0.9, agility: 0.35 },
+  ability: '🚀 Turbo ram',
+};
 
 /** A tracked tank: pivot turning, no drifting, an independent turret. */
-export class Tank {
+export class Tank implements Unit {
+  readonly kind = 'tank' as const;
+  readonly spec = TANK_SPEC;
+  vy = 0;
+  py = 0;
+  energy = 1;
+  airborne = false;
+  landed = 0;
+  dashing = false;
+  reloadScale = 1;
+  energyMul = 1;
   x = 0;
   y = 0;
   z = 0;
@@ -85,8 +98,11 @@ export class Tank {
     this.heading = this.pHeading = this.turret = this.pTurret = heading;
     this.vx = this.vz = this.yawRate = 0;
     this.y = ground.heightAt(x, z);
+    this.py = this.y;
     this.hp = TANK.maxHp;
     this.reload = 0;
+    this.energy = 1;
+    this.reloadScale = 1;
   }
 
   step(dt: number, inp: UnitInput, ground: Ground): void {
@@ -94,6 +110,7 @@ export class Tank {
     this.pz = this.z;
     this.pHeading = this.heading;
     this.pTurret = this.turret;
+    this.py = this.y;
     this.fired = false;
     this.impact = 0;
     const g = ground.sample(this.x, this.z, this.g);
@@ -118,9 +135,14 @@ export class Tank {
 
     const fx = Math.sin(this.heading),
       fz = Math.cos(this.heading);
+    this.dashing = !!inp.dash && this.energy > 0.05 && this.alive;
+    this.energy = this.dashing ? Math.max(0, this.energy - TANK.turboDrain * dt) : Math.min(1, this.energy + TANK.energyRegen * this.energyMul * dt);
+    if (this.dashing && throttle >= 0) throttle = Math.max(throttle, inp.move > 0.08 ? throttle : 1);
+    const top = this.dashing ? TANK.turboSpeed : TANK.maxSpeed;
+    const acc = this.dashing ? TANK.turboAccel : TANK.accel;
     let vF = this.vx * fx + this.vz * fz;
     let vL = this.vx * -fz + this.vz * fx;
-    if (throttle > 0 && vF < TANK.maxSpeed) vF += TANK.accel * trac * throttle * (1 - Math.max(0, vF) / TANK.maxSpeed) * dt;
+    if (throttle > 0 && vF < top) vF += acc * trac * throttle * (1 - Math.max(0, vF) / top) * dt;
     else if (throttle < 0 && vF > -TANK.reverseSpeed) vF += TANK.accel * 0.7 * trac * throttle * dt;
     else vF *= Math.exp(-TANK.drag * dt);
     vF *= 1 - surf.rollDrag * 0.5 * dt;
@@ -150,15 +172,15 @@ export class Tank {
     }
     this.reload = Math.max(0, this.reload - dt);
     if (inp.fire && this.reload <= 0 && this.alive) {
-      this.reload = TANK.reload;
+      this.reload = TANK.reload * this.reloadScale;
       this.fired = true;
     }
   }
 
   /** where a shell leaves the barrel, and its velocity */
-  muzzle(out: { x: number; y: number; z: number; vx: number; vy: number; vz: number }): void {
-    const s = Math.sin(this.turret),
-      c = Math.cos(this.turret);
+  muzzle(out: Muzzle, spread = 0): void {
+    const s = Math.sin(this.turret + spread),
+      c = Math.cos(this.turret + spread);
     out.x = this.x + s * TANK.muzzle;
     out.y = this.y + TANK.turretHeight;
     out.z = this.z + c * TANK.muzzle;

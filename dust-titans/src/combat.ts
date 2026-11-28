@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ColliderHits } from '@engine/world/terrain';
-import type { Ground } from './units/tank';
+import type { Ground } from './units/unit';
 
 /** Combat tuning (kid-friendly: energy shells, sparks, robots falling apart). */
 export const COMBAT = {
@@ -14,7 +14,19 @@ export const COMBAT = {
   orbRadius: 0.5,
 };
 
-export type Team = 'player' | 'enemy';
+export type ShotKind = 'shell' | 'bolt' | 'orb' | 'laser' | 'plasma';
+
+/** per-kind damage, blast radius, gravity, lifetime, hit radius, look */
+export const SHOTS: Record<ShotKind, { damage: number; splash: number; gravity: number; life: number; radius: number; color: number; scale: number; round: boolean }> = {
+  shell: { damage: COMBAT.shellDamage, splash: COMBAT.shellSplash, gravity: COMBAT.shellGravity, life: COMBAT.shellLife, radius: 0.3, color: 0xffd27a, scale: 1, round: false },
+  bolt: { damage: 15, splash: 2.2, gravity: 1.5, life: 1.5, radius: 0.35, color: 0x8ff7ff, scale: 0.7, round: false },
+  orb: { damage: COMBAT.orbDamage, splash: 0, gravity: 0, life: COMBAT.orbLife, radius: COMBAT.orbRadius, color: 0xff4fd8, scale: 1, round: true },
+  laser: { damage: 5, splash: 0, gravity: 0, life: 2.6, radius: 0.35, color: 0xff3b3b, scale: 0.8, round: false },
+  plasma: { damage: 9, splash: 3.5, gravity: 5, life: 4, radius: 0.9, color: 0xff8a2a, scale: 1.9, round: true },
+};
+
+/** 'player' (co-op), 'enemy', or a PvP side ('blue' / 'red' / a player id) */
+export type Team = string;
 
 /** something that can be hit */
 export interface Target {
@@ -25,11 +37,17 @@ export interface Target {
   z: number;
   r: number;
   alive: boolean;
+  /** armour plate: stops shots without taking damage (boss body) */
+  armor?: boolean;
+  /** who owns this hit sphere (enemy object or player slot) */
+  owner?: unknown;
 }
 
 interface Shot {
   team: Team;
-  kind: 'shell' | 'orb';
+  kind: ShotKind;
+  /** who fired it (player id for scores) */
+  by: string;
   x: number;
   y: number;
   z: number;
@@ -44,7 +62,8 @@ export interface Impact {
   y: number;
   z: number;
   team: Team;
-  kind: 'shell' | 'orb';
+  kind: ShotKind;
+  by: string;
   /** the target hit directly, if any */
   target: Target | null;
 }
@@ -53,33 +72,36 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _v = new THREE.Vector3();
+const _c = new THREE.Color();
+const Z = new THREE.Vector3(0, 0, 1);
 
-/** Cannon shells (player) and glowing orbs (drones): flight, hits, rendering. */
+/** Every projectile in the battle: flight, hits, rendering (two instanced meshes). */
 export class Projectiles {
   readonly group = new THREE.Group();
   private shots: Shot[] = [];
   private hits = new ColliderHits();
-  private shellMesh: THREE.InstancedMesh;
-  private orbMesh: THREE.InstancedMesh;
+  private longMesh: THREE.InstancedMesh;
+  private roundMesh: THREE.InstancedMesh;
+  /** friendly fire between these teams (PvP): 'player' shots never hurt 'player' */
+  static hostile(a: Team, b: Team): boolean {
+    return a !== b;
+  }
 
   constructor() {
-    this.shellMesh = new THREE.InstancedMesh(
-      new THREE.CapsuleGeometry(0.22, 1.1, 2, 6).rotateX(Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
-      64,
-    );
-    this.orbMesh = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(COMBAT.orbRadius, 1),
-      new THREE.MeshBasicMaterial({ color: 0xff4fd8, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
-      96,
-    );
-    for (const m of [this.shellMesh, this.orbMesh]) {
+    const mat = () => new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.longMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.22, 1.1, 2, 6).rotateX(Math.PI / 2), mat(), 160);
+    this.roundMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.5, 1), mat(), 160);
+    for (const m of [this.longMesh, this.roundMesh]) {
       m.count = 0;
       m.frustumCulled = false;
       m.renderOrder = 6;
+      m.setColorAt(0, _c.set(0xffffff));
       this.group.add(m);
     }
   }
+
+  /** shots that fly further than this from the centre vanish (never reach the landmarks) */
+  bound = Infinity;
 
   get count(): number {
     return this.shots.length;
@@ -89,36 +111,42 @@ export class Projectiles {
     this.shots.length = 0;
   }
 
-  fire(team: Team, kind: 'shell' | 'orb', x: number, y: number, z: number, vx: number, vy: number, vz: number): void {
-    this.shots.push({ team, kind, x, y, z, vx, vy, vz, life: kind === 'shell' ? COMBAT.shellLife : COMBAT.orbLife });
+  fire(team: Team, kind: ShotKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, by = ''): void {
+    if (this.shots.length > 300) this.shots.shift();
+    this.shots.push({ team, kind, by, x, y, z, vx, vy, vz, life: SHOTS[kind].life });
   }
 
-  /** move everything; collisions with the ground, solid props and targets of the other team */
+  /** move everything; collisions with the ground, solid props and targets of other teams */
   step(dt: number, ground: Ground, targets: readonly Target[], out: Impact[]): void {
     out.length = 0;
     for (let i = this.shots.length - 1; i >= 0; i--) {
       const s = this.shots[i];
+      const cfg = SHOTS[s.kind];
       s.life -= dt;
-      if (s.kind === 'shell') s.vy -= COMBAT.shellGravity * dt;
+      s.vy -= cfg.gravity * dt;
       s.x += s.vx * dt;
       s.y += s.vy * dt;
       s.z += s.vz * dt;
+      if (s.x * s.x + s.z * s.z > this.bound * this.bound) {
+        this.shots.splice(i, 1);
+        continue;
+      }
       let hit: Impact | null = null;
-      const rad = s.kind === 'orb' ? COMBAT.orbRadius : 0.3;
+      const rad = cfg.radius;
       for (const t of targets) {
-        if (!t.alive || t.team === s.team) continue;
+        if (!t.alive || !Projectiles.hostile(s.team, t.team)) continue;
         const dx = s.x - t.x,
           dy = s.y - t.y,
           dz = s.z - t.z;
         const rr = t.r + rad;
         if (dx * dx + dy * dy + dz * dz < rr * rr) {
-          hit = { x: s.x, y: s.y, z: s.z, team: s.team, kind: s.kind, target: t };
+          hit = { x: s.x, y: s.y, z: s.z, team: s.team, kind: s.kind, by: s.by, target: t };
           break;
         }
       }
       if (!hit) {
         const gy = ground.heightAt(s.x, s.z);
-        if (s.y < gy + 0.1) hit = { x: s.x, y: gy + 0.2, z: s.z, team: s.team, kind: s.kind, target: null };
+        if (s.y < gy + 0.1) hit = { x: s.x, y: gy + 0.2, z: s.z, team: s.team, kind: s.kind, by: s.by, target: null };
         else {
           const h = ground.queryColliders(s.x, s.z, rad, this.hits);
           for (let k = 0; k < h.count; k++) {
@@ -126,7 +154,7 @@ export class Projectiles {
             const dx = s.x - h.x[k],
               dz = s.z - h.z[k];
             if (dx * dx + dz * dz < (h.r[k] + rad) ** 2) {
-              hit = { x: s.x, y: s.y, z: s.z, team: s.team, kind: s.kind, target: null };
+              hit = { x: s.x, y: s.y, z: s.z, team: s.team, kind: s.kind, by: s.by, target: null };
               break;
             }
           }
@@ -138,26 +166,33 @@ export class Projectiles {
   }
 
   sync(time: number): void {
-    let ns = 0,
-      no = 0;
+    let nl = 0,
+      nr = 0;
     for (const s of this.shots) {
-      if (s.kind === 'shell') {
-        if (ns >= 64) continue;
+      const cfg = SHOTS[s.kind];
+      if (!cfg.round) {
+        if (nl >= 160) continue;
         _v.set(s.vx, s.vy, s.vz).normalize();
-        _q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), _v);
-        _m.compose(_s.set(s.x, s.y, s.z), _q, new THREE.Vector3(1, 1, 1));
-        this.shellMesh.setMatrixAt(ns++, _m);
+        _q.setFromUnitVectors(Z, _v);
+        _m.compose(_s.set(s.x, s.y, s.z), _q, _v.set(cfg.scale, cfg.scale, cfg.scale * (s.kind === 'laser' ? 1.6 : 1)));
+        this.longMesh.setMatrixAt(nl, _m);
+        this.longMesh.setColorAt(nl++, _c.set(cfg.color));
       } else {
-        if (no >= 96) continue;
-        const pulse = 1 + 0.18 * Math.sin(time * 18 + s.x);
+        if (nr >= 160) continue;
+        const pulse = cfg.scale * (1 + 0.18 * Math.sin(time * 18 + s.x)) * (cfg.radius / 0.5);
         _m.makeScale(pulse, pulse, pulse).setPosition(s.x, s.y, s.z);
-        this.orbMesh.setMatrixAt(no++, _m);
+        this.roundMesh.setMatrixAt(nr, _m);
+        this.roundMesh.setColorAt(nr++, _c.set(cfg.color));
       }
     }
-    this.shellMesh.count = ns;
-    this.orbMesh.count = no;
-    this.shellMesh.instanceMatrix.needsUpdate = true;
-    this.orbMesh.instanceMatrix.needsUpdate = true;
+    for (const [m, n] of [
+      [this.longMesh, nl],
+      [this.roundMesh, nr],
+    ] as const) {
+      m.count = n;
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    }
   }
 }
 
@@ -227,38 +262,70 @@ export class Debris {
   }
 }
 
-/** Repair kits dropped by destroyed robots. */
+export type PickupKind = 'repair' | 'shield' | 'rapid' | 'triple';
+
+export const PICKUPS: Record<PickupKind, { color: number; emissive: number; label: string; time: number }> = {
+  repair: { color: 0x35c46a, emissive: 0x0b4a22, label: '🔧 Repaired!', time: 0 },
+  shield: { color: 0x4fb3ff, emissive: 0x0b2a4a, label: '🛡️ Shield!', time: 8 },
+  rapid: { color: 0xffd23a, emissive: 0x4a3a0b, label: '⚡ Rapid fire!', time: 8 },
+  triple: { color: 0xff7a3a, emissive: 0x4a1a0b, label: '🔱 Triple shot!', time: 8 },
+};
+
+/** Power-up crates dropped by destroyed enemies. */
 export class Pickups {
   readonly group = new THREE.Group();
-  private items: { x: number; y: number; z: number; mesh: THREE.Group; life: number }[] = [];
+  private items: { id: number; kind: PickupKind; x: number; y: number; z: number; mesh: THREE.Group; life: number }[] = [];
+  private nextId = 1;
   private box = new THREE.BoxGeometry(1.1, 1.1, 1.1);
-  private crossA = new THREE.BoxGeometry(0.75, 0.22, 1.14);
-  private crossB = new THREE.BoxGeometry(0.22, 0.75, 1.14);
-  private boxMat = new THREE.MeshLambertMaterial({ color: 0x35c46a, emissive: 0x0b4a22 });
-  private crossMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  private iconA = new THREE.BoxGeometry(0.75, 0.22, 1.14);
+  private iconB = new THREE.BoxGeometry(0.22, 0.75, 1.14);
+  private mats = new Map<PickupKind, THREE.Material>();
+  private iconMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  private got: { id: number; kind: PickupKind; by: number }[] = [];
 
   clear(): void {
     for (const it of this.items) this.group.remove(it.mesh);
     this.items.length = 0;
   }
 
-  drop(x: number, y: number, z: number): void {
+  get count(): number {
+    return this.items.length;
+  }
+
+  /** returns the crate id (online: the host's ids are used everywhere) */
+  drop(x: number, y: number, z: number, kind: PickupKind = 'repair', id = this.nextId++): number {
+    this.nextId = Math.max(this.nextId, id + 1);
+    let mat = this.mats.get(kind);
+    if (!mat) this.mats.set(kind, (mat = new THREE.MeshLambertMaterial({ color: PICKUPS[kind].color, emissive: PICKUPS[kind].emissive })));
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(this.box, this.boxMat));
+    g.add(new THREE.Mesh(this.box, mat));
     for (const r of [0, Math.PI / 2]) {
-      const a = new THREE.Mesh(this.crossA, this.crossMat),
-        b = new THREE.Mesh(this.crossB, this.crossMat);
+      const a = new THREE.Mesh(this.iconA, this.iconMat),
+        b = new THREE.Mesh(this.iconB, this.iconMat);
       a.rotation.y = b.rotation.y = r;
+      b.visible = kind === 'repair' || kind === 'triple'; // cross / plus, or a bar
       g.add(a, b);
     }
     g.position.set(x, y, z);
     this.group.add(g);
-    this.items.push({ x, y, z, mesh: g, life: 25 });
+    this.items.push({ id, kind, x, y, z, mesh: g, life: 25 });
+    return id;
   }
 
-  /** returns how many kits the collector (at x,z) picked up */
-  step(dt: number, time: number, ground: Ground, cx: number, cz: number, reach: number): number {
-    let got = 0;
+  /** someone else took it */
+  remove(id: number): void {
+    const i = this.items.findIndex((it) => it.id === id);
+    if (i < 0) return;
+    this.group.remove(this.items[i].mesh);
+    this.items.splice(i, 1);
+  }
+
+  /**
+   * Move and animate; any collector within `reach` takes the crate. Returns the crates
+   * taken this step (`by` = index into collectors).
+   */
+  step(dt: number, time: number, ground: Ground, collectors: readonly { x: number; z: number; alive: boolean }[], reach: number): readonly { id: number; kind: PickupKind; by: number }[] {
+    this.got.length = 0;
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       it.life -= dt;
@@ -267,15 +334,19 @@ export class Pickups {
       it.mesh.position.set(it.x, it.y + Math.sin(time * 3 + it.x) * 0.2, it.z);
       it.mesh.rotation.y += dt * 1.5;
       it.mesh.visible = it.life > 3 || Math.sin(time * 20) > 0;
-      if ((it.x - cx) ** 2 + (it.z - cz) ** 2 < reach * reach) {
-        got++;
-        it.life = 0;
+      for (let c = 0; c < collectors.length; c++) {
+        const p = collectors[c];
+        if (p.alive && (it.x - p.x) ** 2 + (it.z - p.z) ** 2 < reach * reach) {
+          this.got.push({ id: it.id, kind: it.kind, by: c });
+          it.life = 0;
+          break;
+        }
       }
       if (it.life <= 0) {
         this.group.remove(it.mesh);
         this.items.splice(i, 1);
       }
     }
-    return got;
+    return this.got;
   }
 }

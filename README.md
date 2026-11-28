@@ -7,7 +7,7 @@ A collection of browser games, hosted on GitHub Pages.
 | Game | Play | Source |
 |---|---|---|
 | Dust Rally — top-down rally: stages, endless procedural roads, daily challenge, split-screen and online multiplayer | [Play](https://mustafasaleh.github.io/games/dust-rally/) | [`dust-rally/`](dust-rally/) |
-| Dust Titans — tank and robot-suit battles: drone waves (phase 1), co-op, alliances and city maps planned | [Play](https://mustafasaleh.github.io/games/dust-titans/) | [`dust-titans/`](dust-titans/) |
+| Dust Titans — tank and robot-suit battles: enemy waves and a Giant Robot boss, Cairo / Riyadh / Dubai maps, online co-op, arena and alliance battles | [Play](https://mustafasaleh.github.io/games/dust-titans/) | [`dust-titans/`](dust-titans/) |
 
 ## How it works
 
