@@ -1,0 +1,31 @@
+/* Dust Titans HUD + touch sticks (menus reuse the Dust Rally styles) */
+.tt-hud { position: absolute; inset: 0; pointer-events: none; font-family: inherit; color: #fff8ea; }
+.tt-hp { position: absolute; left: max(14px, env(safe-area-inset-left)); top: max(12px, env(safe-area-inset-top)); width: min(260px, 42vw); }
+.tt-hp-label { font-weight: 900; letter-spacing: 0.12em; font-size: 12px; text-shadow: 0 2px 4px #0008; }
+.tt-bar { height: 14px; margin-top: 4px; background: #0007; border: 2px solid #fff3; border-radius: 9px; overflow: hidden; }
+.tt-bar.small { height: 6px; border-width: 1px; }
+.tt-bar b { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #ffb52e, #ff6a3d); border-radius: 7px; transition: width 0.12s; }
+.tt-bar.small b { background: #fff6d8; transition: none; }
+.tt-bar b.low { background: linear-gradient(90deg, #ff3d3d, #ff7a5a); animation: tt-blink 0.6s infinite alternate; }
+@keyframes tt-blink { to { opacity: 0.55; } }
+.tt-wave { position: absolute; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); text-align: center; font-weight: 900; font-size: 20px; letter-spacing: 0.08em; text-shadow: 0 2px 6px #0009; }
+.tt-wave small { display: block; font-size: 15px; color: #ffd27a; }
+.tt-buttons { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top)); display: flex; gap: 8px; pointer-events: auto; }
+.tt-banner { position: absolute; left: 0; right: 0; top: 28%; text-align: center; font-weight: 900; font-size: clamp(28px, 7vw, 64px); letter-spacing: 0.06em; color: #ffb52e; text-shadow: 0 4px 0 #8a3a12, 0 8px 20px #000a; }
+.tt-banner:empty { display: none; }
+.tt-hurt { position: absolute; inset: 0; box-shadow: inset 0 0 120px 30px #ff2a2a; opacity: 0; }
+.tt-hurt.on { animation: tt-hurt 0.45s ease-out; }
+@keyframes tt-hurt { from { opacity: 0.75; } to { opacity: 0; } }
+
+.tt-touch { position: absolute; inset: 0; pointer-events: none; }
+.tt-zone { position: absolute; bottom: 0; top: 30%; width: 50%; pointer-events: auto; touch-action: none; }
+.tt-zone.move { left: 0; }
+.tt-zone.aim { right: 0; }
+.tt-base { position: absolute; left: -60px; top: -60px; width: 120px; height: 120px; border-radius: 50%; background: #0003; border: 3px solid #fff5; opacity: 0; transition: opacity 0.15s; }
+.tt-base.on { opacity: 1; }
+.tt-knob { position: absolute; left: 32px; top: 32px; width: 56px; height: 56px; border-radius: 50%; background: #ffb52ecc; border: 3px solid #fff8; }
+.tt-zone.aim .tt-knob { background: #ff6a3dcc; }
+.tt-label { position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); font-weight: 900; font-size: 12px; letter-spacing: 0.12em; color: #fff9; }
+.tt-zone.move .tt-label { left: 24px; }
+.tt-zone.aim .tt-label { right: 24px; }
+.tt-how div { margin: 4px 0; }

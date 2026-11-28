@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install (npm workspace at the root, shared by every game)
+        run: npm ci
       - name: Build every game folder that has a package.json
         run: |
           set -e
@@ -31,7 +33,7 @@ jobs:
             name="${dir%/}"
             [ -f "$name/package.json" ] || continue
             echo "::group::Building $name"
-            (cd "$name" && npm ci && npm test --if-present && npm run build)
+            (cd "$name" && npm test --if-present && npm run build)
             mkdir -p "_site/$name"
             cp -r "$name/dist/." "_site/$name/"
             echo "::endgroup::"

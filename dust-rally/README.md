@@ -12,8 +12,8 @@ A lightweight, mobile-first, top-down rally game for the browser. Vite + TypeScr
 ## Run, build, deploy
 
 ```bash
-npm install
-npm run dev        # http://localhost:5173 (also exposed on your LAN for phone testing)
+npm install        # once, at the repository root (npm workspace shared with Dust Titans)
+npm run dev        # in dust-rally/: http://localhost:5173 (also exposed on your LAN for phone testing)
 npm test           # physics + track sanity tests (vitest)
 npm run build      # type-check + production build into dist/
 npm run preview    # serve dist/ locally

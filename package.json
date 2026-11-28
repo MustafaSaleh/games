@@ -1,0 +1,9 @@
+{
+  "name": "games",
+  "private": true,
+  "description": "Browser games. npm workspace: one install at the root, shared by every game (one copy of three.js).",
+  "workspaces": [
+    "dust-rally",
+    "dust-titans"
+  ]
+}
