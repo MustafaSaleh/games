@@ -12,6 +12,7 @@ import { splatScreen } from '../ui/splat';
 import { MusicPlayer, TRACKS, type TrackId } from './music';
 import { Skyline } from '../render/skyline';
 import { buildBridge, buildWater } from '../render/bridge';
+import { LooseRocks, type Pusher } from '../world/rocks';
 import { BIOMES } from '../config/biomes';
 import { GateView } from '../render/gates';
 import { buildCar, disposeCar, setBrakeLights, type CarModel } from '../render/models';
@@ -95,6 +96,10 @@ export class Game {
   private mpShown = false;
   private rbuf = [0, 0, 0, 0, 0, 0];
   private sparks = new Sparks();
+  /** small / medium rocks that cars knock around */
+  private rocks: LooseRocks;
+  private pushers: Pusher[] = [];
+  private remotePushers: Pusher[] = [];
   private skyline = new Skyline();
   /** bridge + water of the current stage (Ghost Bay) */
   private bridgeMesh: THREE.Mesh | null = null;
@@ -145,6 +150,8 @@ export class Game {
     this.ghostModel = buildCar(getStyle(settings.carStyle).id, GHOST_LIVERY, true);
     const sc = this.r3.scene;
     sc.add(this.props.group, this.shadow.mesh, this.carModel.root, this.ghostModel.root, this.marks.mesh, this.particles.points, this.headlights.group, this.gates.group, this.sparks.group, this.tomatoes.group, this.skyline.group);
+    this.rocks = new LooseRocks(this.props.material);
+    sc.add(this.rocks.mesh);
     this.ghostModel.root.visible = false;
 
     this.vignette = el('div', 'vignette', uiRoot);
@@ -391,6 +398,7 @@ export class Game {
     this.marks.clear();
     this.particles.clear();
     this.sparks.clear();
+    this.rocks.clear();
     for (const m of [this.bridgeMesh, this.water]) {
       if (!m) continue;
       this.r3.scene.remove(m);
@@ -693,6 +701,44 @@ export class Game {
     const r = this.remotes.get(id);
     if (r && r.visible) r.showEmote(text);
     else this.say(`${r?.player.name ?? this.session?.players.find((p) => p.id === id)?.name ?? 'Someone'} ${text}`, 1600);
+  }
+
+  /** loose rocks: wake the ones cars touch, then move them (they push back on the cars) */
+  private stepRocks(dt: number, terrain: Terrain, world: World): void {
+    const ps = this.pushers;
+    ps.length = 0;
+    const local = (car: Car): Pusher => ({
+      x: car.x,
+      y: car.y,
+      z: car.z,
+      vx: car.vx,
+      vz: car.vz,
+      heading: car.heading,
+      mass: 1100,
+      push: (dx, dz) => {
+        car.vx += dx;
+        car.vz += dz;
+      },
+    });
+    ps.push(local(this.car));
+    if (this.p2) ps.push(local(this.p2.car));
+    // online players' cars knock rocks around on this screen too (they can't be pushed back)
+    let k = 0;
+    const now = performance.now();
+    for (const r of this.remotes.values()) {
+      if (r.gone || !r.visible) continue;
+      const b = this.remoteBody;
+      if (!r.body(now, b)) continue;
+      const p = (this.remotePushers[k++] ??= { x: 0, y: 0, z: 0, vx: 0, vz: 0, heading: 0, mass: 0 });
+      Object.assign(p, { x: b.x, y: b.y, z: b.z, vx: b.vx, vz: b.vz, heading: b.heading });
+      ps.push(p);
+    }
+    for (const p of ps) this.rocks.wake(p, terrain, world.knockedRocks);
+    if (!this.rocks.count) return;
+    this.rocks.step(dt, terrain, ps);
+    // a solid knock: the usual impact effects (sound, shake, dust; sparks when hard)
+    if ((ps[0].hit ?? 0) > 3) this.car.impact = Math.max(this.car.impact, ps[0].hit! * 0.8);
+    if (this.p2 && (ps[1].hit ?? 0) > 3) this.p2.car.impact = Math.max(this.p2.car.impact, ps[1].hit! * 0.8);
   }
 
   /** fell off the broken bridge into the bay: splash, then back on the deck before the ramp */
@@ -1043,6 +1089,7 @@ export class Game {
     if (running && this.mode === 'stage' && !this.attract)
       this.ghostRec.record(dt, this.car.x, this.car.y, this.car.z, this.car.heading, this.car.upX, this.car.upZ);
     this.emitFx(this.car, dt, inp.handbrake && running);
+    this.stepRocks(dt, terrain, world);
     this.checkWater(1);
     if (p2) {
       this.stepP2(p2, dt, terrain);
@@ -1340,6 +1387,7 @@ export class Game {
     }
     this.particles.update(dt);
     this.sparks.update(dt, ground);
+    this.rocks.sync(this.p2 ? [car, this.p2.car] : [car], this.r3.quality.viewRadius * 1.3);
     this.r3.renderer.getDrawingBufferSize(this.bufSize);
     const viewH = p2 && window.innerWidth < window.innerHeight ? this.bufSize.y / 2 : this.bufSize.y;
     this.particles.mat.uniforms.uScale.value = viewH / (2 * Math.tan((this.cam.camera.fov * Math.PI) / 360));

@@ -51,6 +51,8 @@ export class Chunk {
   readonly colZ = new Float32Array(COL_CAP);
   readonly colR = new Float32Array(COL_CAP);
   readonly colTop = new Float32Array(COL_CAP);
+  /** loose rocks: index of the rock instance this collider belongs to, -1 = solid */
+  readonly colProp = new Int16Array(COL_CAP);
   readonly cellStart = new Uint16Array(COL_CELLS * COL_CELLS + 1);
   readonly cellItems = new Uint16Array(COL_CAP);
   private readonly cellOf = new Uint8Array(COL_CAP);
@@ -315,7 +317,9 @@ export class Chunk {
                 : rule.type === 'shrub'
                   ? mixRGB(pal.bush, pal.trunk, 0.4, tmpRGB)
                   : pal.bush;
-          this.addProp(rule.type, x, z, lx, lz, s, rng.next() * Math.PI * 2, color);
+          const rot = rng.next() * Math.PI * 2;
+          if (rule.type === 'rock' && world.knockedRocks.has(rockKey(x, z))) continue; // knocked away earlier
+          this.addProp(rule.type, x, z, lx, lz, s, rot, color);
         }
         yield;
       }
@@ -385,6 +389,7 @@ export class Chunk {
       this.colZ[i] = z;
       this.colR[i] = pc.r * s;
       this.colTop[i] = y + pc.top * s;
+      this.colProp[i] = type === 'rock' && s <= LOOSE_ROCK_MAX ? b.count - 1 : -1;
       const gx = clamp(Math.floor(lx / COL_CELL), 0, COL_CELLS - 1);
       const gz = clamp(Math.floor(lz / COL_CELL), 0, COL_CELLS - 1);
       this.cellOf[i] = gz * COL_CELLS + gx;
@@ -456,7 +461,15 @@ export class ColliderHits {
   z = new Float32Array(64);
   r = new Float32Array(64);
   top = new Float32Array(64);
+  /** 1 = a loose rock (pushed around instead of being solid) */
+  loose = new Uint8Array(64);
+  /** where the collider lives (to wake a loose rock) */
+  chunk: (Chunk | null)[] = new Array(64).fill(null);
+  idx = new Int16Array(64);
 }
+
+/** rocks up to this scale can be knocked around; bigger boulders stay solid */
+export const LOOSE_ROCK_MAX = 1.2;
 
 /**
  * Streams chunks around a focus point. Generation is time-sliced (generators) so a
@@ -681,11 +694,15 @@ export class Terrain {
         for (let k = c.cellStart[cell]; k < c.cellStart[cell + 1]; k++) {
           if (out.count >= out.x.length) return out;
           const i = c.cellItems[k];
+          if (c.colR[i] <= 0) continue; // a loose rock that was knocked away
           const n = out.count++;
           out.x[n] = c.colX[i];
           out.z[n] = c.colZ[i];
           out.r[n] = c.colR[i];
           out.top[n] = c.colTop[i];
+          out.loose[n] = c.colProp[i] >= 0 ? 1 : 0;
+          out.chunk[n] = c;
+          out.idx[n] = i;
         }
       }
     return out;
@@ -713,4 +730,9 @@ function redwoodTint(r: number, out: RGB): RGB {
   out[1] = v;
   out[2] = v;
   return out;
+}
+
+/** identity of a rock by its original spot (so a knocked rock doesn't reappear) */
+export function rockKey(x: number, z: number): number {
+  return Math.round(x * 4) * 100003 + Math.round(z * 4);
 }

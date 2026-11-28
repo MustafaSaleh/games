@@ -190,6 +190,8 @@ export abstract class World {
   safeRespawn(idx: number): number {
     return idx;
   }
+  /** loose rocks that were knocked away this run (rockKey of their original spot) */
+  readonly knockedRocks = new Set<number>();
   /** fixed obstacles on/near the road (wrecks, barriers) */
   readonly obstacles: { x: number; z: number; rot: number; type: PropType }[] = [];
 
