@@ -27,6 +27,8 @@ export class Hud {
   onCamera: () => void = () => {};
   onMusic: () => void = () => {};
   onEmote: (i: number) => void = () => {};
+  /** spectating: -1 / +1 = previous / next player, 0 = back to results */
+  onSpectate: (dir: number) => void = () => {};
 
   constructor(parent: HTMLElement) {
     const r = (this.root = document.createElement('div'));
@@ -50,6 +52,12 @@ export class Hud {
       <div class="hud-emotes" data-k="emotes">${EMOTES.map((e, i) => `<button class="emote" data-i="${i}" title="${i + 1}">${e}</button>`).join('')}
       </div>
       <div class="hud-msg" data-k="msg"></div>
+      <div class="spec-bar">
+        <button class="icon-btn" data-k="specPrev" aria-label="Previous player">◀</button>
+        <span data-k="specName"></span>
+        <button class="icon-btn" data-k="specNext" aria-label="Next player">▶</button>
+        <button class="btn tiny" data-k="specRes">Results</button>
+      </div>
       <div class="hud-count" data-k="count"></div>
       <div class="hud-speed" data-k="gauge">
         <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -77,6 +85,9 @@ export class Hud {
     this.el.cam.addEventListener('click', () => this.onCamera());
     this.el.music.addEventListener('click', () => this.onMusic());
     this.el.emo.addEventListener('click', () => this.root.classList.toggle('emotes-open'));
+    this.el.specPrev.addEventListener('click', () => this.onSpectate(-1));
+    this.el.specNext.addEventListener('click', () => this.onSpectate(1));
+    this.el.specRes.addEventListener('click', () => this.onSpectate(0));
     this.el.emotes.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
       if (b) this.onEmote(Number(b.dataset.i));
