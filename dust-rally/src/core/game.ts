@@ -1658,6 +1658,7 @@ export class Game {
     else if (race.missedWarn > 0) msg = 'MISSED CHECKPOINT — GO BACK';
     else if (race.wrongWay) msg = 'WRONG WAY';
     else if (race.offTrackFar) msg = 'OFF ROUTE — press ↺';
+    if (this.spectating) msg = ''; // watching someone else: only announcements
     if ((!msg || this.toast.important) && this.toast.until > performance.now()) msg = this.toast.text;
     hud.set('msg', msg);
     if (settings.showFps) hud.set('fps', `${this.r3.fps.toFixed(0)} fps · dpr ${this.r3.dpr} · ${this.props.instances} props`);

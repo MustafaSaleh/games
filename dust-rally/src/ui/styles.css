@@ -1492,6 +1492,7 @@ input:not([type]) {
   text-align: center;
 }
 .hud.spectating .hud-speed,
+.hud.spectating .hud-ammo,
 .hud.spectating .hud-top-center {
   display: none;
 }
