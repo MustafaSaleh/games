@@ -122,7 +122,7 @@ export class Game {
   private tomatoHits: TomatoHit[] = [];
   private tomatoTargets: TomatoTarget[] = [];
   private splatLayer: HTMLElement;
-  private toast = { text: '', until: 0 };
+  private toast = { text: '', until: 0, important: false };
   private contact: CarContact = makeContact();
   private remoteBody: CarBody = { x: 0, y: 0, z: 0, vx: 0, vz: 0, heading: 0, yawRate: 0 };
   private dots: MapDot[] = [];
@@ -622,9 +622,11 @@ export class Game {
     this.say(this.p2 ? `P${who} got a 🍅! (${key} to throw)` : `🍅 +1! Throw it back at your chaser (${isTouchDevice() ? 'tap 🍅' : 'F'})`);
   }
 
-  private say(text: string, ms = 2200): void {
+  /** a short HUD message; `important` ones (winner announcements) win over route warnings */
+  private say(text: string, ms = 2200, important = false): void {
     this.toast.text = text;
     this.toast.until = performance.now() + ms;
+    this.toast.important = important;
   }
 
   private throwTomato(who: 1 | 2): void {
@@ -1013,7 +1015,7 @@ export class Game {
       const place = this.finishOrder.length;
       // everyone still racing (or watching) hears about it
       if (!this.menu.visible)
-        this.say(place === 1 ? `🏆 ${r.player.name} won the race! (${fmtTime(t)})` : `🏁 ${r.player.name} finished ${ordinal(place)}`, place === 1 ? 3500 : 2200);
+        this.say(place === 1 ? `🏆 ${r.player.name} won the race! (${fmtTime(t)})` : `🏁 ${r.player.name} finished ${ordinal(place)}`, place === 1 ? 3500 : 2200, true);
       this.refreshMpResults();
     };
     s.ev.left = (id) => {
@@ -1656,7 +1658,7 @@ export class Game {
     else if (race.missedWarn > 0) msg = 'MISSED CHECKPOINT — GO BACK';
     else if (race.wrongWay) msg = 'WRONG WAY';
     else if (race.offTrackFar) msg = 'OFF ROUTE — press ↺';
-    if (!msg && this.toast.until > performance.now()) msg = this.toast.text;
+    if ((!msg || this.toast.important) && this.toast.until > performance.now()) msg = this.toast.text;
     hud.set('msg', msg);
     if (settings.showFps) hud.set('fps', `${this.r3.fps.toFixed(0)} fps · dpr ${this.r3.dpr} · ${this.props.instances} props`);
     const next = race.nextGate();
