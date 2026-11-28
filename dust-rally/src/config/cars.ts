@@ -2,19 +2,69 @@
  * Garage: car body styles and colour liveries (cosmetic only – handling is the same).
  * Add a livery by appending to CAR_LIVERIES; add a body style in render/models.ts (buildCar).
  */
-export type CarStyle = 'hatch' | 'coupe' | 'truck';
+export type CarStyle = 'hatch' | 'coupe' | 'truck' | 'roadster' | 'buggy';
+
+/**
+ * Performance. Multipliers on the shared handling (config/handling.ts), plus the weight:
+ *  power     engine acceleration
+ *  topSpeed  maximum speed
+ *  mass      kg: who shoves whom in car crashes, how rocks fly
+ *  grip      sideways grip on tarmac
+ *  offroad   grip + traction on loose surfaces (gravel, dirt, sand, snow, mud, grass)
+ *  steer     steering sharpness
+ * Every car trades something away: none is best at everything.
+ */
+export interface CarSpec {
+  power: number;
+  topSpeed: number;
+  mass: number;
+  grip: number;
+  offroad: number;
+  steer: number;
+}
 
 export interface CarStyleDef {
   id: CarStyle;
   name: string;
   description: string;
+  spec: CarSpec;
 }
 
 export const CAR_STYLES: CarStyleDef[] = [
-  { id: 'hatch', name: 'Hatch', description: 'Classic rally hatchback with roof spoiler and light pod.' },
-  { id: 'coupe', name: 'Coupe', description: 'Low, long-nosed coupe with a big rear wing.' },
-  { id: 'truck', name: 'Raid', description: 'Tall rally-raid truck with roof rack and big tyres.' },
+  {
+    id: 'hatch',
+    name: 'Hatch',
+    description: 'The all-rounder: classic rally hatchback, good everywhere.',
+    spec: { power: 1, topSpeed: 1, mass: 1100, grip: 1, offroad: 1, steer: 1 },
+  },
+  {
+    id: 'coupe',
+    name: 'Coupe',
+    description: 'Fast and planted on tarmac with its big wing; slippery on dirt.',
+    spec: { power: 1.07, topSpeed: 1.08, mass: 1200, grip: 1.1, offroad: 0.88, steer: 0.95 },
+  },
+  {
+    id: 'truck',
+    name: 'Raid',
+    description: 'Heavy rally-raid truck: slower, but unstoppable off-road and shoves everyone aside.',
+    spec: { power: 0.93, topSpeed: 0.9, mass: 1750, grip: 0.92, offroad: 1.16, steer: 0.88 },
+  },
+  {
+    id: 'roadster',
+    name: 'Roadster',
+    description: 'Open-top two-seater: light, quick and sharp on tarmac. Hold on to your helmet!',
+    spec: { power: 1.05, topSpeed: 1.05, mass: 900, grip: 1.08, offroad: 0.86, steer: 1.12 },
+  },
+  {
+    id: 'buggy',
+    name: 'Buggy',
+    description: 'Two-seat dune buggy with a roll cage: flies off the line and loves sand and dirt; easy to bump around.',
+    spec: { power: 1.12, topSpeed: 0.9, mass: 700, grip: 0.95, offroad: 1.22, steer: 1.1 },
+  },
 ];
+
+/** the reference car (hatch) */
+export const BASE_SPEC: CarSpec = CAR_STYLES[0].spec;
 
 export interface Livery {
   id: string;

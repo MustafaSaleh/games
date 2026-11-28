@@ -30,7 +30,17 @@ The build writes `dist/sw.js` with a precache list of every built file (see `vit
 
 ## Garage
 
-**Garage** in the main menu: choose a body style (Hatch, Coupe, Raid truck) and one of 10 colour liveries. The car is shown on a turntable that slowly spins; drag it to see it from every side (360°). The choice is saved, used in every mode, and purely cosmetic: all cars handle the same.
+**Garage** in the main menu: choose one of five cars and one of 10 colour liveries. Cars drive differently (`spec` in `src/config/cars.ts`: power, top speed, weight, tarmac grip, off-road grip, steering; the Garage shows them as bars):
+
+| Car | Character |
+|---|---|
+| Hatch | all-rounder (reference) |
+| Coupe | fast and planted on tarmac, slippery on dirt |
+| Raid | heavy truck: slower, great off-road, shoves other cars and rocks aside |
+| Roadster | open-top two-seater: light, quick, sharp on tarmac |
+| Buggy | two-seat dune buggy with a roll cage: quickest off the line, loves sand and dirt, easy to bump around |
+
+Weight matters in car crashes (impulse by both masses) and when knocking rocks. The colour is cosmetic. The car is shown on a turntable that slowly spins; drag it to see it from every side (360°). The choice is saved, used in every mode, and purely cosmetic: all cars handle the same.
 
 - Add a livery: append `{ id, name, body, stripe, roof }` to `CAR_LIVERIES` in `src/config/cars.ts`.
 - Add a body style: add it to `CAR_STYLES` (`src/config/cars.ts`), write a builder function next to `hatch`/`coupe`/`truck` in `src/render/models.ts`, and give it wheel dimensions in `WHEELS`.

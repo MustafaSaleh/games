@@ -3,7 +3,7 @@ import { parseSeed, seedToString } from '../core/rng';
 import type { StageDef } from '../world/stage';
 import { fmtTime } from './hud';
 import type { CharacterView, Gesture } from '../render/character';
-import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle } from '../config/cars';
+import { CAR_LIVERIES, CAR_STYLES, getLivery, getStyle, type CarSpec } from '../config/cars';
 import { load } from '../core/storage';
 import { isTouchDevice } from '../core/settings';
 import { BUILD, EMOTES } from '../net/session';
@@ -443,6 +443,10 @@ export class Menu {
           ['medium', 'Medium'],
           ['high', 'High'],
         ])}</label>
+        <label>Speed in ${sel('units', [
+          ['kmh', 'km/h'],
+          ['mph', 'mph'],
+        ])}</label>
         <label>Time of day ${sel('timeOfDay', [
           ['auto', 'Track default'],
           ['day', 'Day'],
@@ -487,9 +491,10 @@ export class Menu {
       <div class="set-group">Car</div>
       <div class="chips">${styles}</div>
       <p class="muted small">${esc(st.description)}</p>
+      ${carStatsHtml(st.spec)}
       <div class="set-group">Colour · <span class="livery-name">${esc(lv.name)}</span></div>
       <div class="swatches">${swatches}</div>
-      <p class="muted small">Cosmetic only — every car handles the same.</p>
+      <p class="muted small">The colour is just for looks; the car you pick changes how it drives.</p>
       <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
   }
 
@@ -678,4 +683,20 @@ export class Menu {
     if ((key === 'steer' || key === 'cameraView') && e.type === 'change') setTimeout(() => this.current === 'settings' && this.render(), 0);
     this.h.settingsChanged(settings);
   }
+}
+
+/** Garage: performance bars for a car (scaled so differences are easy to see) */
+function carStatsHtml(sp: CarSpec): string {
+  const bar = (label: string, value: number, lo: number, hi: number, text: string) => {
+    const pct = Math.round(Math.max(0.08, Math.min(1, (value - lo) / (hi - lo))) * 100);
+    return `<div class="stat-row"><span>${label}</span><i><b style="width:${pct}%"></b></i><em>${text}</em></div>`;
+  };
+  return `<div class="car-stats">
+    ${bar('Power', sp.power, 0.8, 1.15, '')}
+    ${bar('Top speed', sp.topSpeed, 0.8, 1.1, `${Math.round(46 * 3.6 * sp.topSpeed)} km/h`)}
+    ${bar('Weight', sp.mass, 500, 1800, `${sp.mass} kg`)}
+    ${bar('Grip', sp.grip, 0.8, 1.12, '')}
+    ${bar('Off-road', sp.offroad, 0.75, 1.25, '')}
+    ${bar('Handling', sp.steer, 0.8, 1.15, '')}
+  </div>`;
 }

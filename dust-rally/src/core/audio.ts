@@ -1,8 +1,6 @@
 import { clamp } from './math';
 import { settings } from './settings';
 
-/** Gear top speeds (m/s) used to fake an RPM curve. */
-const GEARS = [0, 9, 16, 23, 31, 39, 50];
 
 /**
  * Procedural Web Audio: engine (two oscillators through a low-pass, pitch from fake
@@ -126,17 +124,10 @@ export class GameAudio {
     if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
-  update(dt: number, speed: number, throttle: number, slide: number, airborne: boolean, wheelspin: number, skidMul: number, dust: number): void {
+  /** `rpm` comes from the shared Gearbox (core/gearbox.ts), so the sound matches the rev gauge */
+  update(rpm: number, speed: number, throttle: number, slide: number, airborne: boolean, skidMul: number, dust: number): void {
     if (!this.ctx || !this.active || this.ctx.state !== 'running') return;
-    // fake gearbox
-    let g = 1;
-    while (g < GEARS.length - 1 && speed > GEARS[g]) g++;
-    const lo = GEARS[g - 1] * 0.75,
-      hi = GEARS[g];
-    let target = 1000 + clamp((speed - lo) / (hi - lo), 0, 1) * 5600;
-    if (airborne || wheelspin > 0.2) target = Math.max(target, 2500 + 4500 * Math.max(throttle, wheelspin));
-    if (throttle < 0.05 && !airborne) target *= 0.85;
-    this.rpm += (target - this.rpm) * Math.min(1, dt * (target > this.rpm ? 6 : 4));
+    this.rpm = rpm;
     const f = this.rpm / 30;
     const t = this.ctx.currentTime;
     this.osc1.frequency.setTargetAtTime(f, t, 0.03);
