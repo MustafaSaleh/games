@@ -10,6 +10,7 @@ import { makeContact, resolveCarCar, type CarBody, type CarContact } from '../ph
 import { TOMATO, TomatoSystem, aimThrow, type TomatoHit, type TomatoTarget } from './tomatoes';
 import { splatScreen } from '../ui/splat';
 import { MusicPlayer, TRACKS, type TrackId } from './music';
+import { Gearbox, MAX_RPM, REDLINE } from './gearbox';
 import { Skyline } from '../render/skyline';
 import { buildBridge, buildWater } from '../render/bridge';
 import { LooseRocks, type Pusher } from '../world/rocks';
@@ -56,6 +57,8 @@ export class Game {
   readonly input = new Input();
   readonly audio = new GameAudio();
   readonly music = new MusicPlayer();
+  /** shared by the engine sound and the rev gauge */
+  private gearbox = new Gearbox();
   readonly hud: Hud;
   readonly menu: Menu;
   readonly touch: TouchControls;
@@ -1401,7 +1404,9 @@ export class Game {
 
     if (!this.attract) this.updateHud();
     const surf = SURFACES[car.surface];
-    this.audio.update(dt, car.speed, race.state === 'running' ? this.input.throttle : 0, Math.max(car.slide, this.input.handbrake ? 0.7 : 0), car.airborne, car.wheelspin, surf.skid, surf.dust);
+    const thr = race.state === 'running' ? this.input.throttle : 0;
+    this.gearbox.update(dt, car.forwardSpeed, thr, car.airborne, car.wheelspin, car.spec.topSpeed);
+    this.audio.update(this.gearbox.rpm, car.speed, thr, Math.max(car.slide, this.input.handbrake ? 0.7 : 0), car.airborne, surf.skid, surf.dust);
 
     this.r3.monitor(frameDt);
     if (p2) this.r3.renderSplit([this.cam.camera, p2.cam.camera]);
@@ -1530,7 +1535,11 @@ export class Game {
       hud.set('time', race.timeLeft.toFixed(1));
       hud.cls('time', 'low', race.timeLeft < 10);
     }
-    hud.set('speed', String(Math.round(car.speed * 3.6)));
+    const mph = settings.units === 'mph';
+    hud.set('speed', String(Math.round(car.speed * (mph ? 2.237 : 3.6))));
+    hud.set('unit', mph ? 'mph' : 'km/h');
+    hud.set('gear', this.gearbox.label);
+    hud.setRpm(this.gearbox.rpm / MAX_RPM, this.gearbox.rpm > REDLINE);
     if (this.mode !== 'stage') hud.set('split', `${Math.floor(race.maxS)} m`);
     else if (race.splitShow > 0 && race.splitDelta != null) {
       hud.set('split', `CP ${race.gatesPassed}  ${fmtDelta(race.splitDelta)}`);

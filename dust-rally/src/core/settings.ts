@@ -17,6 +17,8 @@ export interface Settings {
   cameraRotate: boolean;
   /** race camera: high top-down view or third-person chase view */
   cameraView: 'top' | 'chase';
+  /** speed shown in km/h or mph */
+  units: 'kmh' | 'mph';
   /** background music */
   music: boolean;
   musicVolume: number;
@@ -39,6 +41,7 @@ const DEFAULTS: Settings = {
   timeOfDay: 'auto',
   cameraRotate: false,
   cameraView: 'top',
+  units: 'kmh',
   music: true,
   musicVolume: 0.5,
   musicTrack: 'auto',

@@ -14,6 +14,9 @@ export function fmtDelta(d: number): string {
 }
 
 /** In-race HUD. Only touches the DOM when a value actually changes. */
+/** length of the gauge's 270° arc (r = 50) */
+const ARC = 2 * Math.PI * 50 * 0.75;
+
 export class Hud {
   readonly root: HTMLDivElement;
   readonly minimap: Minimap;
@@ -48,7 +51,22 @@ export class Hud {
       </div>
       <div class="hud-msg" data-k="msg"></div>
       <div class="hud-count" data-k="count"></div>
-      <div class="hud-speed"><span data-k="speed">0</span><small>km/h</small></div>
+      <div class="hud-speed" data-k="gauge">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <linearGradient id="rpm-grad" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stop-color="#ff6a3d" />
+              <stop offset="0.6" stop-color="#ffa45c" />
+              <stop offset="1" stop-color="#ffe7c4" />
+            </linearGradient>
+          </defs>
+          <circle class="g-track" cx="60" cy="60" r="50" transform="rotate(135 60 60)" />
+          <circle class="g-rpm" data-k="rpm" cx="60" cy="60" r="50" transform="rotate(135 60 60)" />
+        </svg>
+        <div class="g-gear" data-k="gear">N</div>
+        <div class="g-speed" data-k="speed">0</div>
+        <div class="g-unit" data-k="unit">km/h</div>
+      </div>
       <div class="hud-fps" data-k="fps"></div>
     `;
     parent.appendChild(r);
@@ -77,6 +95,17 @@ export class Hud {
     if (this.cache[k] === v) return;
     this.cache[k] = v;
     this.el[key].classList.toggle(cls, on);
+  }
+
+  private rpmShown = -1;
+  /** rev gauge: 0..1 of the arc; turns red near the limiter */
+  setRpm(frac: number, red: boolean): void {
+    const f = Math.round(Math.max(0, Math.min(1, frac)) * 200) / 200;
+    if (f !== this.rpmShown) {
+      this.rpmShown = f;
+      this.el.rpm.style.strokeDasharray = `${(f * ARC).toFixed(1)} 400`;
+    }
+    this.cls('gauge', 'redline', red);
   }
 
   show(on: boolean): void {

@@ -443,6 +443,10 @@ export class Menu {
           ['medium', 'Medium'],
           ['high', 'High'],
         ])}</label>
+        <label>Speed in ${sel('units', [
+          ['kmh', 'km/h'],
+          ['mph', 'mph'],
+        ])}</label>
         <label>Time of day ${sel('timeOfDay', [
           ['auto', 'Track default'],
           ['day', 'Day'],
