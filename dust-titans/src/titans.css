@@ -40,7 +40,7 @@
 .tt-boss .tt-bar b { background: linear-gradient(90deg, #ff3b3b, #ffa23a); }
 .tt-boss[hidden] { display: none; }
 /* garage */
-.tt-units { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+.tt-units { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 10px 0; }
 .tt-unit { text-align: left; padding: 12px; border-radius: 14px; border: 2px solid #ffffff22; background: #ffffff0d; color: inherit; font: inherit; cursor: pointer; }
 .tt-unit.sel { border-color: #ffb52e; background: #ffb52e1f; }
 .tt-unit b { display: block; font-size: 17px; margin-bottom: 4px; }

@@ -3,8 +3,8 @@ import type { Terrain } from '@engine/world/terrain';
 /** Ground interface a unit needs (Terrain implements it; tests use a mock). */
 export type Ground = Pick<Terrain, 'sample' | 'heightAt' | 'queryColliders'>;
 
-export type UnitKind = 'tank' | 'mech' | 'scout';
-export const UNIT_KINDS: UnitKind[] = ['tank', 'mech', 'scout'];
+export type UnitKind = 'tank' | 'mech' | 'scout' | 'warbot';
+export const UNIT_KINDS: UnitKind[] = ['tank', 'mech', 'scout', 'warbot'];
 export const unitKind = (v: unknown): UnitKind => (UNIT_KINDS.includes(v as UnitKind) ? (v as UnitKind) : 'tank');
 
 /**
@@ -21,7 +21,7 @@ export interface UnitInput {
   fire: boolean;
   /** mech: jump-jets (hold to hover a little) */
   jump?: boolean;
-  /** mech: dash · tank: turbo ram · scout: nitro */
+  /** mech: dash · tank: turbo ram · scout: nitro · warbot: ground slam */
   dash?: boolean;
   /** special weapon (held; the game uses the press) */
   special?: boolean;
