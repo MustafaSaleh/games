@@ -12,9 +12,9 @@ import type { UnitInput, UnitKind } from './units/unit';
  *    JUMP / DASH buttons
  */
 export class TitansInput {
-  readonly unit: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false, jump: false, dash: false };
+  readonly unit: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false, jump: false, dash: false, special: false };
   /** on-screen buttons (touch) */
-  readonly buttons = { jump: false, dash: false };
+  readonly buttons = { jump: false, dash: false, special: false };
   /** world point the player aims at (for the ground marker), or null */
   readonly aimPoint = new THREE.Vector3();
   aimVisible = false;
@@ -77,6 +77,7 @@ export class TitansInput {
     let fire = k.has('KeyF') || k.has('KeyJ') || k.has('Enter') || this.mouse.down;
     let jump = k.has('Space') || this.buttons.jump;
     let dash = k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyK') || this.buttons.dash;
+    let special = k.has('KeyQ') || k.has('KeyE') || k.has('KeyL') || this.buttons.special;
     let aimSX = 0,
       aimSY = 0,
       stickAim = false;
@@ -100,6 +101,7 @@ export class TitansInput {
       fire = fire || (p.buttons[7]?.value ?? 0) > 0.3 || !!p.buttons[5]?.pressed;
       jump = jump || !!p.buttons[0]?.pressed;
       dash = dash || !!p.buttons[1]?.pressed || !!p.buttons[4]?.pressed;
+      special = special || !!p.buttons[3]?.pressed || !!p.buttons[2]?.pressed;
       for (let b = 0; b < p.buttons.length; b++) {
         const now = !!p.buttons[b]?.pressed;
         this.padEdge[b] = now && !this.padPrev[b];
@@ -151,9 +153,10 @@ export class TitansInput {
     u.fire = fire && this.enabled;
     u.jump = jump && this.enabled;
     u.dash = dash && this.enabled;
+    u.special = special && this.enabled;
     if (!this.enabled) {
       u.move = 0;
-      u.fire = u.jump = u.dash = false;
+      u.fire = u.jump = u.dash = u.special = false;
     }
   }
 }
@@ -162,13 +165,13 @@ export class TitansInput {
 export class TouchSticks {
   readonly root: HTMLDivElement;
 
-  private btn: Record<'jump' | 'dash', HTMLButtonElement>;
+  private btn: Record<'jump' | 'dash' | 'special', HTMLButtonElement>;
 
   constructor(parent: HTMLElement, input: TitansInput) {
     const root = (this.root = document.createElement('div'));
     root.className = 'tt-touch';
     parent.appendChild(root);
-    const mk = (k: 'jump' | 'dash', label: string) => {
+    const mk = (k: 'jump' | 'dash' | 'special', label: string) => {
       const b = document.createElement('button');
       b.className = `tt-btn ${k}`;
       b.textContent = label;
@@ -184,7 +187,7 @@ export class TouchSticks {
       b.addEventListener('pointerleave', set(false));
       return b;
     };
-    this.btn = { jump: mk('jump', 'JUMP'), dash: mk('dash', 'DASH') };
+    this.btn = { jump: mk('jump', 'JUMP'), dash: mk('dash', 'DASH'), special: mk('special', '🚀') };
     for (const side of ['move', 'aim'] as const) {
       const zone = document.createElement('div');
       zone.className = `tt-zone ${side}`;
@@ -239,13 +242,21 @@ export class TouchSticks {
       zone.addEventListener('pointerup', end);
       zone.addEventListener('pointercancel', end);
     }
-    root.append(this.btn.jump, this.btn.dash);
+    root.append(this.btn.jump, this.btn.dash, this.btn.special);
   }
 
   /** tank: TURBO only · mech: JUMP + DASH */
   setUnit(kind: UnitKind): void {
     this.btn.jump.style.display = kind === 'mech' ? '' : 'none';
-    this.btn.dash.textContent = kind === 'mech' ? 'DASH' : 'TURBO';
+    this.btn.dash.textContent = kind === 'mech' ? 'DASH' : kind === 'scout' ? 'NITRO' : 'TURBO';
+  }
+
+  /** special button: its icon, and how charged it is (0..1) */
+  setSpecial(icon: string, charge: number): void {
+    const b = this.btn.special;
+    if (b.textContent !== icon) b.textContent = icon;
+    b.style.setProperty('--charge', String(Math.round(charge * 100) / 100));
+    b.classList.toggle('ready', charge >= 1);
   }
 
   show(on: boolean): void {

@@ -3,10 +3,13 @@ import { settings, updateSettings, isTouchDevice } from '@engine/core/settings';
 import { load, save } from '@engine/core/storage';
 import { MECH_SPEC } from './units/mech';
 import { TANK_SPEC } from './units/tank';
-import { LIVERIES, UPGRADES, liveryById, type UnitKind, type UnitSpec, type UpgradeId, type Upgrades } from './units/unit';
+import { SCOUT_SPEC } from './units/scout';
+import { LIVERIES, UPGRADES, liveryById, unitKind, type UnitKind, type UnitSpec, type UpgradeId, type Upgrades } from './units/unit';
 import * as THREE from 'three';
 import { EMOTES, HOST_ID, MODES, type Mode, type Room, type Side } from './net/room';
 import { ARENAS, arenaById } from './arena';
+import { SPECIALS, SPECIAL_IDS, specialId, type SpecialId } from './specials';
+import { MISSIONS, missionById } from './missions';
 
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -24,9 +27,10 @@ export interface ResultRow {
 export interface Loadout {
   unit: UnitKind;
   livery: string;
+  special: SpecialId;
 }
 
-export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC };
+export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC, scout: SCOUT_SPEC };
 
 export function loadUpgrades(): Upgrades {
   const u = load<Partial<Upgrades>>('titans.upgrades', {});
@@ -36,7 +40,7 @@ export function loadUpgrades(): Upgrades {
 
 export function loadLoadout(): Loadout {
   const l = load<Partial<Loadout>>('titans.loadout', {});
-  return { unit: l.unit === 'mech' ? 'mech' : 'tank', livery: liveryById(l.livery ?? '').id };
+  return { unit: unitKind(l.unit), livery: liveryById(l.livery ?? '').id, special: specialId(l.special) };
 }
 
 /** Battle HUD: health, cannon reload, wave + score, buttons, banners, damage flash. */
@@ -66,6 +70,8 @@ export class BattleHud {
         <button class="icon-btn" data-k="cam" aria-label="Camera" title="Camera (C)">🎥</button>
         <button class="icon-btn" data-k="music" aria-label="Music" title="Music (M)">🎵</button>
       </div>
+      <div class="tt-special" data-k="special"><span data-k="specialIcon">🚀</span><small>Q</small></div>
+      <div class="tt-splat" data-k="splat"></div>
       <div class="tt-board" data-k="board"></div>
       <div class="tt-banner" data-k="banner"></div>
       <div class="tt-emotes" data-k="emotes">${EMOTES.map((e, i) => `<button data-emote="${i}">${e}</button>`).join('')}</div>
@@ -79,14 +85,36 @@ export class BattleHud {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-emote]');
       if (b) this.onEmote(+b.dataset.emote!);
     });
+    this.el.special.addEventListener('click', () => this.onSpecial());
+    if (isTouchDevice()) this.el.special.style.display = 'none'; // the touch SPECIAL button instead
     this.online(false);
+  }
+
+  onSpecial = () => {};
+
+  /** special weapon icon + charge 0..1 */
+  special(icon: string, charge: number): void {
+    this.set('specialIcon', icon);
+    const c = String(Math.round(charge * 50) / 50);
+    if (this.cache.charge === c) return;
+    this.cache.charge = c;
+    this.el.special.style.setProperty('--charge', c);
+    this.el.special.classList.toggle('ready', charge >= 1);
+  }
+
+  /** tomato in the face! */
+  splat(): void {
+    const s = this.el.splat;
+    s.classList.remove('on');
+    void s.offsetWidth;
+    s.classList.add('on');
   }
 
   onEmote = (_i: number) => {};
 
-  /** emoji bar + scoreboard only online */
-  online(on: boolean): void {
-    this.el.emotes.style.display = on ? '' : 'none';
+  /** scoreboard in battles with others; emoji bar only online */
+  online(on: boolean, emotes = on): void {
+    this.el.emotes.style.display = emotes ? '' : 'none';
     this.el.board.style.display = on ? '' : 'none';
   }
 
@@ -137,6 +165,10 @@ export interface MenuHandlers {
   startRoom(): void;
   setMode(m: Mode): void;
   setSide(s: Side): void;
+  practice(mode: Mode, skill: number): void;
+  mission(id: string): void;
+  /** leave a finished battle quietly (back to the menu background) */
+  quitToMenu(): void;
   toRoom(): void;
   pickArena(id: string): void;
   emote(i: number): void;
@@ -166,6 +198,10 @@ export class TitansMenu {
   shareUrl = '';
   mpResult: { title: string; sub: string; rows: ResultRow[]; teams?: { blue: number; red: number }; coins?: number } | null = null;
   private keep: Record<string, string> = {};
+  missionResult: { id: string; next: string; win: boolean; stars: number; coins: number; time: number; name: string } | null = null;
+  /** practice bots skill */
+  skill = load<number>('titans.skill', 0.25);
+  lastPractice: Mode = 'arena';
   /** solo battlefield */
   arena = load<string>('titans.arena', 'desert-bowl');
 
@@ -226,6 +262,12 @@ export class TitansMenu {
         <div class="btn-col">
           <button class="btn primary" data-act="play">▶ Play: ${arenaById(this.arena).name}<small>Survive the waves · Giant Robot every 5th wave</small></button>
           <button class="btn" data-act="arenas">🗺️ Battlefield<small>${arenaById(this.arena).icon} ${arenaById(this.arena).name}</small></button>
+          <button class="btn" data-act="missions">🎯 Missions<small>${(() => {
+            const p = load<Record<string, number>>('titans.missions', {});
+            const st = MISSIONS.reduce((a, m) => a + (p[m.id] ?? 0), 0);
+            return `${st} / ${MISSIONS.length * 3} ⭐`;
+          })()}</small></button>
+          <button class="btn" data-act="practicemenu">⚔️ Practice battle<small>Arena and alliance battles against computer players</small></button>
           <button class="btn" data-act="online">👥 Play with friends<small>Co-op, arena and alliance battles online</small></button>
           <button class="btn" data-act="garage">🛠️ Garage<small>${SPECS[this.loadout.unit].name} · ${liveryById(this.loadout.livery).name}</small></button>
           <button class="btn" data-act="how">How to play</button>
@@ -260,11 +302,14 @@ export class TitansMenu {
       const l = this.loadout;
       const bar = (label: string, v: number) => `<div class="tt-stat"><span>${label}</span><i><em style="width:${Math.round(v * 100)}%"></em></i></div>`;
       const card = (sp: UnitSpec) => `<button class="tt-unit ${l.unit === sp.kind ? 'sel' : ''}" data-unit="${sp.kind}">
-          <b>${sp.kind === 'tank' ? '🛡️' : '🤖'} ${sp.name}</b><small>${sp.blurb}</small>
+          <b>${sp.icon} ${sp.name}</b><small>${sp.blurb}</small>
           ${bar('Armour', sp.bars.armour)}${bar('Speed', sp.bars.speed)}${bar('Firepower', sp.bars.firepower)}${bar('Agility', sp.bars.agility)}
           <div class="tt-ability">${sp.ability}</div></button>`;
       html = `<h2>Garage</h2>
-        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}</div>
+        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}${card(SCOUT_SPEC)}</div>
+        <div class="muted small">Special weapon (Q)</div>
+        <div class="tt-specials">${SPECIAL_IDS.map((id) => `<button class="tt-spec ${l.special === id ? 'sel' : ''}" data-special="${id}" title="${SPECIALS[id].blurb}">${SPECIALS[id].icon} ${SPECIALS[id].name}</button>`).join('')}</div>
+        <div class="muted small tt-spec-blurb">${SPECIALS[l.special].blurb}</div>
         <div class="tt-upgrades"><div class="tt-coins">🪙 ${this.coins} coins</div>
           ${(Object.keys(UPGRADES) as UpgradeId[])
             .map((id) => {
@@ -283,6 +328,32 @@ export class TitansMenu {
     } else if (s === 'arenas') {
       html = `<h2>Choose a battlefield</h2><div class="tt-arenas">${ARENAS.map((a) => `<button class="tt-arena ${a.id === this.arena ? 'sel' : ''}" data-arena="${a.id}"><span>${a.icon}</span><b>${a.name}</b><small>${a.description}</small></button>`).join('')}</div>
         <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
+    } else if (s === 'missions') {
+      const prog = load<Record<string, number>>('titans.missions', {});
+      const star = (n: number) => '⭐'.repeat(n) + '☆'.repeat(3 - n);
+      html = `<h2>Missions</h2><div class="tt-arenas">${MISSIONS.map((m) => `<button class="tt-arena" data-mission="${m.id}"><span>${m.icon}</span><b>${m.name} <i class="tt-stars">${star(prog[m.id] ?? 0)}</i></b><small>${arenaById(m.arena).icon} ${arenaById(m.arena).name} · ${m.brief}</small></button>`).join('')}</div>
+        <p class="muted small">⭐ finish · ⭐⭐ with half your armour left · ⭐⭐⭐ also quickly. Uses your Garage unit.</p>
+        <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
+    } else if (s === 'missionover' && this.missionResult) {
+      const r = this.missionResult;
+      html = `<h2 class="${r.win ? 'record' : ''}">${r.win ? 'Mission complete!' : 'Mission failed'}</h2>
+        <div class="result-line">${esc(r.name)}</div>
+        ${r.win ? `<div class="tt-bigstars">${'⭐'.repeat(r.stars)}${'☆'.repeat(3 - r.stars)}</div><div class="result-line">Time ${Math.floor(r.time / 60)}:${String(Math.floor(r.time % 60)).padStart(2, '0')}</div>` : `<div class="result-line">${esc(missionById(r.id)?.brief ?? '')}</div>`}
+        ${r.coins ? `<div class="tt-earned">+${r.coins} 🪙</div>` : ''}
+        <div class="btn-col">
+          ${r.win && r.next ? `<button class="btn primary" data-mission="${r.next}">Next mission ▶</button>` : ''}
+          <button class="btn ${r.win && r.next ? '' : 'primary'}" data-mission="${r.id}">${r.win ? 'Play again' : 'Try again'}</button>
+          <button class="btn ghost" data-act="missions">Missions</button>
+        </div>`;
+    } else if (s === 'practicemenu') {
+      html = `<h2>Practice battle</h2>
+        <p class="muted small">Battle computer players on ${arenaById(this.arena).icon} ${arenaById(this.arena).name}. Same rules as online.</p>
+        <div class="btn-col">
+          <button class="btn primary" data-act="prac" data-pm="arena">⚔️ Arena<small>You vs 3 bots · 3 minutes · most knock-outs wins</small></button>
+          <button class="btn" data-act="prac" data-pm="alliance">🔵🔴 Alliance<small>You + 1 bot vs 2 bots, with enemy waves</small></button>
+        </div>
+        <div class="tt-sides"><button class="btn ${this.skill < 0.5 ? 'primary' : 'ghost'}" data-skill="0.25">😊 Easy bots</button><button class="btn ${this.skill >= 0.5 ? 'primary' : 'ghost'}" data-skill="0.75">😤 Tough bots</button></div>
+        <div class="btn-row"><button class="btn ghost" data-act="back">Back</button></div>`;
     } else if (s === 'online') {
       const name = esc(this.keep['tt-name'] ?? load<string>('mp.name', ''));
       const code = esc(this.keep['tt-code'] ?? this.codeHint);
@@ -306,7 +377,7 @@ export class TitansMenu {
         .map((p) => {
           const lv = liveryById(p.livery);
           const side = r.mode === 'alliance' ? `<i class="tt-side" style="background:${SIDE_COLORS[p.side]}"></i>` : '';
-          return `<div class="tt-prow ${p.id === r.myId ? 'me' : ''}">${side}<span class="tt-chip" style="background:linear-gradient(135deg,${hex(lv.body)} 55%,${hex(lv.stripe)} 55%)"></span><b>${esc(p.name)}</b><span>${p.unit === 'mech' ? '🤖 Robot suit' : '🛡️ Tank'}</span>${p.id === HOST_ID ? '<em>host</em>' : ''}</div>`;
+          return `<div class="tt-prow ${p.id === r.myId ? 'me' : ''}">${side}<span class="tt-chip" style="background:linear-gradient(135deg,${hex(lv.body)} 55%,${hex(lv.stripe)} 55%)"></span><b>${esc(p.name)}</b><span>${SPECS[unitKind(p.unit)].icon} ${SPECS[unitKind(p.unit)].name}</span>${p.id === HOST_ID ? '<em>host</em>' : ''}</div>`;
         })
         .join('');
       const modes = (Object.keys(MODES) as Mode[])
@@ -342,8 +413,13 @@ export class TitansMenu {
         ${R.teams ? `<div class="tt-teams"><span style="color:${SIDE_COLORS.blue}">Blue ${R.teams.blue}</span> · <span style="color:${SIDE_COLORS.red}">Red ${R.teams.red}</span></div>` : ''}
         <div class="tt-players">${rows}</div>
         <div class="btn-col">
-          <button class="btn primary" data-act="toroom">Back to the room</button>
-          <button class="btn ghost" data-act="leave">Leave room</button>
+          ${
+            this.room
+              ? `<button class="btn primary" data-act="toroom">Back to the room</button>
+          <button class="btn ghost" data-act="leave">Leave room</button>`
+              : `<button class="btn primary" data-act="prac" data-pm="${this.lastPractice}">Play again</button>
+          <button class="btn ghost" data-act="quit">Menu</button>`
+          }
         </div>`;
     } else if (s === 'pause') {
       html = `<h2>Paused</h2><div class="btn-col">
@@ -387,12 +463,21 @@ export class TitansMenu {
       this.h.pickArena(this.arena);
       return this.render();
     }
+    const ms = (e.target as HTMLElement).closest<HTMLElement>('[data-mission]');
+    if (ms) return this.h.mission(ms.dataset.mission!);
+    const sk = (e.target as HTMLElement).closest<HTMLElement>('[data-skill]');
+    if (sk) {
+      this.skill = +sk.dataset.skill!;
+      save('titans.skill', this.skill);
+      return this.render();
+    }
     const md = (e.target as HTMLElement).closest<HTMLElement>('[data-mode]');
     if (md) return this.h.setMode(md.dataset.mode as Mode);
     const sd = (e.target as HTMLElement).closest<HTMLElement>('[data-side]');
     if (sd) return this.h.setSide(sd.dataset.side as Side);
-    const u = (e.target as HTMLElement).closest<HTMLElement>('[data-unit],[data-livery]');
+    const u = (e.target as HTMLElement).closest<HTMLElement>('[data-unit],[data-livery],[data-special]');
     if (u) {
+      if (u.dataset.special) this.loadout.special = specialId(u.dataset.special);
       if (u.dataset.unit) this.loadout.unit = u.dataset.unit as UnitKind;
       if (u.dataset.livery) this.loadout.livery = u.dataset.livery;
       save('titans.loadout', this.loadout);
@@ -419,6 +504,15 @@ export class TitansMenu {
       } else if (act === 'create') this.h.createRoom(name);
       else this.h.joinRoom(code, name);
     } else if (act === 'leave') this.h.leaveRoom();
+    else if (act === 'practicemenu') this.show('practicemenu');
+    else if (act === 'missions') {
+      this.h.quitToMenu();
+      this.show('missions');
+    }
+    else if (act === 'prac') {
+      this.lastPractice = (t.dataset.pm as Mode) ?? 'arena';
+      this.h.practice(this.lastPractice, this.skill);
+    }
     else if (act === 'start') this.h.startRoom();
     else if (act === 'toroom') this.h.toRoom();
     else if (act === 'share') this.share();

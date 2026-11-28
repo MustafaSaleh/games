@@ -14,7 +14,7 @@ export const COMBAT = {
   orbRadius: 0.5,
 };
 
-export type ShotKind = 'shell' | 'bolt' | 'orb' | 'laser' | 'plasma';
+export type ShotKind = 'shell' | 'bolt' | 'orb' | 'laser' | 'plasma' | 'pellet' | 'rocket' | 'tomato';
 
 /** per-kind damage, blast radius, gravity, lifetime, hit radius, look */
 export const SHOTS: Record<ShotKind, { damage: number; splash: number; gravity: number; life: number; radius: number; color: number; scale: number; round: boolean }> = {
@@ -23,7 +23,13 @@ export const SHOTS: Record<ShotKind, { damage: number; splash: number; gravity: 
   orb: { damage: COMBAT.orbDamage, splash: 0, gravity: 0, life: COMBAT.orbLife, radius: COMBAT.orbRadius, color: 0xff4fd8, scale: 1, round: true },
   laser: { damage: 5, splash: 0, gravity: 0, life: 2.6, radius: 0.35, color: 0xff3b3b, scale: 0.8, round: false },
   plasma: { damage: 9, splash: 3.5, gravity: 5, life: 4, radius: 0.9, color: 0xff8a2a, scale: 1.9, round: true },
+  pellet: { damage: 7, splash: 0, gravity: 1, life: 1.1, radius: 0.3, color: 0xfff27a, scale: 0.45, round: false },
+  rocket: { damage: 16, splash: 3.5, gravity: 0, life: 3, radius: 0.4, color: 0xff7a3a, scale: 0.9, round: false },
+  tomato: { damage: 6, splash: 4, gravity: 14, life: 3, radius: 0.6, color: 0xff3b2a, scale: 1.3, round: true },
 };
+
+/** homing: rockets turn toward the nearest hostile target ahead */
+const SEEK = { range: 75, turn: 4.5, speed: 58 };
 
 /** 'player' (co-op), 'enemy', or a PvP side ('blue' / 'red' / a player id) */
 export type Team = string;
@@ -124,6 +130,7 @@ export class Projectiles {
       const cfg = SHOTS[s.kind];
       s.life -= dt;
       s.vy -= cfg.gravity * dt;
+      if (s.kind === 'rocket') this.seek(s, targets, dt);
       s.x += s.vx * dt;
       s.y += s.vy * dt;
       s.z += s.vz * dt;
@@ -163,6 +170,38 @@ export class Projectiles {
       if (hit) out.push(hit);
       if (hit || s.life <= 0) this.shots.splice(i, 1);
     }
+  }
+
+  private seek(s: Shot, targets: readonly Target[], dt: number): void {
+    let best: Target | null = null,
+      bd = SEEK.range;
+    const sp = Math.hypot(s.vx, s.vy, s.vz) || 1;
+    for (const t of targets) {
+      if (!t.alive || t.armor || !Projectiles.hostile(s.team, t.team)) continue;
+      const dx = t.x - s.x,
+        dy = t.y - s.y,
+        dz = t.z - s.z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < bd && (dx * s.vx + dy * s.vy + dz * s.vz) / (d * sp) > 0.2) {
+        bd = d;
+        best = t;
+      }
+    }
+    const k = Math.min(1, SEEK.turn * dt);
+    const ns = sp + (SEEK.speed - sp) * Math.min(1, 2 * dt);
+    if (best) {
+      const dx = best.x - s.x,
+        dy = best.y - s.y,
+        dz = best.z - s.z;
+      const d = Math.hypot(dx, dy, dz) || 1;
+      s.vx += ((dx / d) * sp - s.vx) * k;
+      s.vy += ((dy / d) * sp - s.vy) * k;
+      s.vz += ((dz / d) * sp - s.vz) * k;
+    }
+    const l = Math.hypot(s.vx, s.vy, s.vz) || 1;
+    s.vx *= ns / l;
+    s.vy *= ns / l;
+    s.vz *= ns / l;
   }
 
   sync(time: number): void {
@@ -262,13 +301,14 @@ export class Debris {
   }
 }
 
-export type PickupKind = 'repair' | 'shield' | 'rapid' | 'triple';
+export type PickupKind = 'repair' | 'shield' | 'rapid' | 'triple' | 'supply';
 
 export const PICKUPS: Record<PickupKind, { color: number; emissive: number; label: string; time: number }> = {
   repair: { color: 0x35c46a, emissive: 0x0b4a22, label: '🔧 Repaired!', time: 0 },
   shield: { color: 0x4fb3ff, emissive: 0x0b2a4a, label: '🛡️ Shield!', time: 8 },
   rapid: { color: 0xffd23a, emissive: 0x4a3a0b, label: '⚡ Rapid fire!', time: 8 },
   triple: { color: 0xff7a3a, emissive: 0x4a1a0b, label: '🔱 Triple shot!', time: 8 },
+  supply: { color: 0xffd23a, emissive: 0x6a4a0b, label: '📦 Got one!', time: 0 },
 };
 
 /** Power-up crates dropped by destroyed enemies. */
@@ -308,8 +348,26 @@ export class Pickups {
     }
     g.position.set(x, y, z);
     this.group.add(g);
-    this.items.push({ id, kind, x, y, z, mesh: g, life: 25 });
+    this.items.push({ id, kind, x, y, z, mesh: g, life: kind === 'supply' ? 60 : 25 });
     return id;
+  }
+
+  countKind(kind: PickupKind): number {
+    return this.items.filter((it) => it.kind === kind).length;
+  }
+
+  /** closest crate to (x, z) */
+  nearest(x: number, z: number): { x: number; z: number } | null {
+    let best: { x: number; z: number } | null = null,
+      bd = Infinity;
+    for (const it of this.items) {
+      const d = (it.x - x) ** 2 + (it.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = it;
+      }
+    }
+    return best;
   }
 
   /** someone else took it */

@@ -2,7 +2,7 @@ import type * as THREE from 'three';
 import type { ShotKind, Target } from '../combat';
 import type { Ground } from '../units/unit';
 
-export type EnemyKind = 'drone' | 'walker' | 'alien' | 'boss';
+export type EnemyKind = 'drone' | 'walker' | 'alien' | 'boss' | 'beacon';
 
 /** what enemies can see of a player */
 export interface PlayerRef {
@@ -45,6 +45,8 @@ export interface Enemy {
   readonly alive: boolean;
   /** points for destroying it */
   readonly score: number;
+  /** frozen by an EMP / stuck in tomato juice (s) */
+  stunT?: number;
   update(dt: number, ctx: EnemyCtx): void;
   sync(dt: number, time: number, ctx: EnemyCtx): void;
   /** hit spheres for projectiles (weak points first) */

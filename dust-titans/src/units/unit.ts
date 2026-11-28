@@ -3,7 +3,9 @@ import type { Terrain } from '@engine/world/terrain';
 /** Ground interface a unit needs (Terrain implements it; tests use a mock). */
 export type Ground = Pick<Terrain, 'sample' | 'heightAt' | 'queryColliders'>;
 
-export type UnitKind = 'tank' | 'mech';
+export type UnitKind = 'tank' | 'mech' | 'scout';
+export const UNIT_KINDS: UnitKind[] = ['tank', 'mech', 'scout'];
+export const unitKind = (v: unknown): UnitKind => (UNIT_KINDS.includes(v as UnitKind) ? (v as UnitKind) : 'tank');
 
 /**
  * What a unit is asked to do this step. Movement is "screen-relative": the player points
@@ -19,11 +21,13 @@ export interface UnitInput {
   fire: boolean;
   /** mech: jump-jets (hold to hover a little) */
   jump?: boolean;
-  /** mech: dash · tank: turbo ram */
+  /** mech: dash · tank: turbo ram · scout: nitro */
   dash?: boolean;
+  /** special weapon (held; the game uses the press) */
+  special?: boolean;
 }
 
-export const NO_UNIT_INPUT: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false, jump: false, dash: false };
+export const NO_UNIT_INPUT: UnitInput = { moveX: 0, moveZ: 0, move: 0, aimYaw: null, fire: false, jump: false, dash: false, special: false };
 
 export interface Muzzle {
   x: number;
@@ -44,7 +48,25 @@ export interface UnitSpec {
   mass: number;
   /** centre height for being hit */
   hitHeight: number;
-  shot: 'shell' | 'bolt';
+  shot: 'shell' | 'bolt' | 'pellet';
+  icon: string;
+  maxSpeed: number;
+  /** base reload (s) */
+  reload: number;
+  /** height of the aiming plane above the unit */
+  aimHeight: number;
+  /** hit sphere radius */
+  hitR: number;
+  /** name tag height */
+  tagHeight: number;
+  /** shield bubble radius / centre height */
+  bubble: [number, number];
+  /** chase camera size */
+  chase: number;
+  /** how much the body tilts with the ground (1 = fully) */
+  upright: number;
+  /** share of the push it takes when bumping enemies (heavy = small) */
+  push: number;
   bars: { armour: number; speed: number; firepower: number; agility: number };
   ability: string;
 }
