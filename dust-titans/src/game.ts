@@ -14,7 +14,9 @@ import { PropRenderer } from '@engine/world/props';
 import { LooseRocks, type Pusher } from '@engine/world/rocks';
 import { Terrain, makeGroundSample } from '@engine/world/terrain';
 import { mixRGB, type BiomeMix, type RGB } from '@engine/world/world';
-import { ARENAS, ArenaWorld } from './arena';
+import { ArenaGround, ArenaWorld, arenaById, buildScenery, type ArenaDef } from './arena';
+import { buildWater } from '@engine/render/bridge';
+import { disposeGroup } from './world/kit';
 import { Debris, PICKUPS, Pickups, Projectiles, SHOTS, type Impact, type PickupKind, type ShotKind, type Target, type Team } from './combat';
 import { Alien } from './enemies/alien';
 import { Boss } from './enemies/boss';
@@ -83,6 +85,11 @@ export class TitansGame {
   enemies: Enemy[] = [];
   private world!: ArenaWorld;
   terrain!: Terrain;
+  /** terrain + city cover: what units, shots and enemies collide with */
+  ground!: ArenaGround;
+  private scenery: THREE.Group | null = null;
+  private water: THREE.Mesh | null = null;
+  arena: ArenaDef = arenaById(load<string>('titans.arena', 'desert-bowl'));
   private props = new PropRenderer();
   private particles: Particles;
   private sparks = new Sparks(320);
@@ -97,6 +104,9 @@ export class TitansGame {
   private targets: Target[] = [];
   private aimMarker: THREE.Mesh;
   private flash = new THREE.PointLight(0xffb060, 0, 30, 2);
+  /** night arenas: a cool fill light and a lamp over your unit */
+  private nightFill = new THREE.HemisphereLight(0x9fb0ff, 0x3a3048, 0);
+  private lamp = new THREE.PointLight(0xffe2b0, 0, 40, 1.6);
   private bubbleGeo = new THREE.SphereGeometry(1, 18, 12);
   private bubbleMat = new THREE.MeshBasicMaterial({ color: 0x5fb8ff, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending });
   state: State = 'menu';
@@ -140,7 +150,7 @@ export class TitansGame {
       new THREE.MeshBasicMaterial({ color: 0xffb52e, transparent: true, opacity: 0.85, depthWrite: false }),
     );
     this.aimMarker.renderOrder = 7;
-    this.r3.scene.add(this.props.group, this.shadow.mesh, this.marks.mesh, this.particles.points, this.sparks.group, this.rocks.mesh, this.shots.group, this.debris.mesh, this.pickups.group, this.aimMarker, this.flash);
+    this.r3.scene.add(this.props.group, this.shadow.mesh, this.marks.mesh, this.particles.points, this.sparks.group, this.rocks.mesh, this.shots.group, this.debris.mesh, this.pickups.group, this.aimMarker, this.flash, this.nightFill, this.lamp);
 
     this.input = new TitansInput(canvas);
     this.hud = new BattleHud(ui);
@@ -160,6 +170,10 @@ export class TitansGame {
       setMode: (m) => this.room?.setMode(m),
       setSide: (sd) => this.room?.setSide(sd),
       toRoom: () => this.toRoom(),
+      pickArena: (id) => {
+        if (this.room?.isHost) this.room.setArena(id);
+        else this.pickArena(id);
+      },
       emote: (i) => this.emote(i),
       resume: () => this.resume(),
       quit: () => this.quit(),
@@ -238,7 +252,7 @@ export class TitansGame {
     bubble.visible = false;
     this.r3.scene.add(view.root, bubble);
     const p: Player = { id, name, team, local, unit, view, livery, bubble, shieldT: 0, rapidT: 0, tripleT: 0, score: 0, ko: 0, slot, side, respawnT: 0, ref: { x: 0, y: 0, z: 0, vx: 0, vz: 0, r: unit.spec.radius, alive: false, airborne: false } };
-    unit.reset(0, -20, 0, this.terrain);
+    unit.reset(0, -20, 0, this.ground);
     return p;
   }
 
@@ -262,14 +276,33 @@ export class TitansGame {
   /* flow                                                                 */
   /* ------------------------------------------------------------------ */
 
-  private loadArena(): void {
+  private loadArena(def = this.arena): void {
+    if (this.terrain && this.world?.def === def) return;
+    this.arena = def;
     this.terrain?.dispose();
-    this.world = new ArenaWorld(ARENAS[0]);
+    if (this.scenery) disposeGroup(this.scenery);
+    if (this.water) disposeGroup(this.water);
+    this.world = new ArenaWorld(def);
     this.terrain = new Terrain(this.world, this.r3.quality.viewRadius);
     this.terrain.setPropDensity(this.r3.quality.propDensity);
     this.r3.scene.add(this.terrain.group);
     this.terrain.ensureAround(0, 0, 140);
-    this.ctx.ground = this.terrain;
+    const sc = buildScenery(def, (x, z) => this.terrain.heightAt(x, z));
+    this.scenery = sc.group;
+    this.r3.scene.add(sc.group);
+    this.ground = new ArenaGround(this.terrain, sc.solids);
+    this.water = Number.isFinite(this.world.waterLevel) ? buildWater(this.world.waterLevel) : null;
+    if (this.water) this.r3.scene.add(this.water);
+    this.ctx.ground = this.ground;
+    this.shots.bound = def.radius + 25;
+    for (const p of this.players) p.unit.reset(p.unit.x, p.unit.z, p.unit.heading, this.ground);
+  }
+
+  /** solo: pick a battlefield (also shown behind the menu) */
+  private pickArena(id: string): void {
+    save('titans.arena', id);
+    this.loadArena(arenaById(id));
+    this.resetBattle();
   }
 
   private clearEnemies(): void {
@@ -288,7 +321,7 @@ export class TitansGame {
     this.marks.clear();
     for (const p of this.players) {
       const sp = this.spawnPoint(p);
-      p.unit.reset(sp.x, sp.z, sp.h, this.terrain);
+      p.unit.reset(sp.x, sp.z, sp.h, this.ground);
       p.shieldT = p.rapidT = p.tripleT = 0;
       p.score = p.ko = p.respawnT = 0;
     }
@@ -389,7 +422,8 @@ export class TitansGame {
   private gameOver(): void {
     this.state = 'over';
     const best = load<number>('titans.best', 0);
-    this.menu.result = { wave: this.wave, score: this.score, best, record: this.score > best };
+    const coins = this.menu.earn(this.score / 40 + this.wave * 5);
+    this.menu.result = { wave: this.wave, score: this.score, best, record: this.score > best, coins };
     if (this.score > best) save('titans.best', this.score);
     this.hud.show(false);
     this.sticks.show(false);
@@ -409,7 +443,7 @@ export class TitansGame {
 
   private updateMusic(): void {
     this.music.set(settings.music, settings.musicVolume);
-    this.music.play(this.state === 'playing' ? (this.boss ? 'turbo' : 'dust') : 'sunny');
+    this.music.play(this.state === 'playing' ? (this.boss ? 'turbo' : this.arena.music) : 'sunny');
   }
 
   private applySettings(): void {
@@ -454,7 +488,7 @@ export class TitansGame {
     this.menu.netError = '';
     this.menu.refresh();
     try {
-      const room = await Room.create(await this.driver(), name, this.loadout.unit, this.loadout.livery, ARENAS[0].id);
+      const room = await Room.create(await this.driver(), name, this.loadout.unit, this.loadout.livery, this.arena.id);
       this.bindRoom(room);
     } catch (e) {
       this.menu.netBusy = '';
@@ -505,7 +539,7 @@ export class TitansGame {
       lobby: () => {
         if (this.menu.current === 'room') this.menu.refresh();
       },
-      start: (mode, _arena, players, seed) => this.startOnline(mode, players, seed),
+      start: (mode, arena, players, seed) => this.startOnline(mode, players, seed, arena),
       game: (t, id, d) => this.onGame(t, id, d),
       left: (id) => {
         const p = this.players.find((x) => x.id === id && !x.local);
@@ -568,9 +602,10 @@ export class TitansGame {
   }
 
   /** the host pressed Start: build every player and go */
-  private startOnline(mode: Mode, players: RoomPlayer[], _seed: number): void {
+  private startOnline(mode: Mode, players: RoomPlayer[], _seed: number, arena: string): void {
     const room = this.room;
     if (!room) return;
+    this.loadArena(arenaById(arena));
     this.mode = mode;
     for (const p of [...this.players]) this.removePlayer(p);
     this.remote.clear();
@@ -807,7 +842,9 @@ export class TitansGame {
     const rows: ResultRow[] = [...this.players]
       .sort((a, b) => (this.mode === 'coop' ? b.score - a.score : b.ko - a.ko || b.score - a.score))
       .map((p) => ({ name: p.name, me: p.local, score: p.score, ko: p.ko, side: this.mode === 'alliance' ? p.side : undefined }));
-    this.menu.mpResult = { title: String(o.title || ''), sub: String(o.sub || ''), rows, teams: this.mode === 'alliance' ? { blue: this.teamPoints('blue'), red: this.teamPoints('red') } : undefined };
+    const me = this.local;
+    const coins = me ? this.menu.earn(me.score / 40 + me.ko * 20 + this.wave * 3 + 10) : 0;
+    this.menu.mpResult = { title: String(o.title || ''), sub: String(o.sub || ''), rows, teams: this.mode === 'alliance' ? { blue: this.teamPoints('blue'), red: this.teamPoints('red') } : undefined, coins };
     this.hud.show(false);
     this.sticks.show(false);
     this.audio.setActive(false);
@@ -828,7 +865,7 @@ export class TitansGame {
     this.hud.set('banner', `Back in ${Math.max(1, Math.ceil(me.respawnT))}…`);
     if (me.respawnT > 0) return;
     const sp = this.mode === 'coop' && mates.length ? { x: mates[0].unit.x + 6, z: mates[0].unit.z, h: mates[0].unit.heading } : this.spawnPoint(me);
-    me.unit.reset(sp.x, sp.z, sp.h, this.terrain);
+    me.unit.reset(sp.x, sp.z, sp.h, this.ground);
     if (this.mode === 'coop') me.unit.hp = me.unit.spec.maxHp * 0.6;
     me.shieldT = 3;
     this.hud.set('banner', '');
@@ -895,6 +932,7 @@ export class TitansGame {
     inp.endFrame();
     if (this.state === 'paused') return;
     const terrain = this.terrain;
+    const ground = this.ground;
     const playing = this.state === 'playing';
 
     // ---- players ----
@@ -913,8 +951,10 @@ export class TitansGame {
         continue;
       }
       const ui: UnitInput = p.local && playing && u.alive ? inp.unit : NO_UNIT_INPUT;
-      u.reloadScale = p.rapidT > 0 ? 0.45 : 1;
-      u.step(dt, ui, terrain);
+      u.reloadScale = (p.rapidT > 0 ? 0.45 : 1) * (p.local ? 1 - 0.07 * this.menu.ups.reload : 1);
+      u.energyMul = p.local ? 1 + 0.15 * this.menu.ups.energy : 1;
+      u.step(dt, ui, ground);
+      this.wade(u, dt);
       this.world.clamp(u);
       p.shieldT = Math.max(0, p.shieldT - dt);
       p.rapidT = Math.max(0, p.rapidT - dt);
@@ -970,11 +1010,11 @@ export class TitansGame {
       tg.push({ id: p.id, team: p.team, x: u.x, y: u.y + u.spec.hitHeight, z: u.z, r: u.kind === 'mech' ? 1.7 : TANK.radius * 0.9, alive: u.alive && playing, owner: p });
     }
     for (const e of this.enemies) e.targets(tg);
-    this.shots.step(dt, terrain, tg, this.impacts);
+    this.shots.step(dt, ground, tg, this.impacts);
     for (const hit of this.impacts) this.onImpact(hit);
-    this.debris.step(dt, terrain);
+    this.debris.step(dt, ground);
     const me = this.local;
-    const got = this.pickups.step(dt, this.time, terrain, me ? [{ x: me.unit.x, z: me.unit.z, alive: me.unit.alive && playing }] : [], 3.2);
+    const got = this.pickups.step(dt, this.time, ground, me ? [{ x: me.unit.x, z: me.unit.z, alive: me.unit.alive && playing }] : [], 3.2);
     for (const g of got) {
       this.applyPickup(me, g.kind);
       this.room?.send('take', g.id);
@@ -1261,7 +1301,7 @@ export class TitansGame {
       if (p.local) this.audio.impact(3);
       return;
     }
-    u.hp -= dmg;
+    u.hp -= dmg * (1 - 0.08 * this.menu.ups.armour);
     const dx = u.x - fromX,
       dz = u.z - fromZ;
     const l = Math.hypot(dx, dz) || 1;
@@ -1334,6 +1374,19 @@ export class TitansGame {
           }
         }
       }
+    }
+  }
+
+  /** shallow water (Nile, Dubai beach): slows you down and splashes */
+  private wade(u: Unit, dt: number): void {
+    const w = this.world.waterLevel;
+    if (!Number.isFinite(w) || u.airborne || u.y > w - 0.25) return;
+    const drag = Math.exp(-1.6 * dt);
+    u.vx *= drag;
+    u.vz *= drag;
+    if (u.speed > 2 && this.steps % 2 === 0) {
+      const a = Math.random() * Math.PI * 2;
+      this.particles.emit(u.x + Math.cos(a) * 2, w + 0.2, u.z + Math.sin(a) * 2, Math.cos(a) * 2, 2 + Math.random() * 3, Math.sin(a) * 2, [0.75, 0.88, 0.95], 1 + Math.random(), 0.6, 0.8);
     }
   }
 
@@ -1513,6 +1566,10 @@ export class TitansGame {
     const tod = this.world.def.timeOfDay;
     this.r3.applyLighting(tod, tod, 0, this.fog, this.cam.dist, chase ? this.r3.quality.viewRadius * 1.2 : Infinity);
     this.flash.intensity *= Math.exp(-dt * 9);
+    const night = tod === 'night';
+    this.nightFill.intensity = night ? 1.6 : 0;
+    this.lamp.intensity = night ? 60 : 0;
+    this.lamp.position.set(x, y + 9, z);
 
     // effects
     this.shadow.update(x, z, h, 0, this.terrain, this.r3.light.level);

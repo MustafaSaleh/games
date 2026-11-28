@@ -76,6 +76,7 @@ export class Mech implements Unit {
   fired = false;
   impact = 0;
   reloadScale = 1;
+  energyMul = 1;
   /** metres walked (leg animation phase) */
   stride = 0;
   /** jets firing this step (flames) */
@@ -212,7 +213,7 @@ export class Mech implements Unit {
       this.vy = 0;
     }
     if (!this.airborne) this.stride += sp * dt;
-    if (!this.jets && !this.dashing) this.energy = Math.min(1, this.energy + MECH.energyRegen * (this.airborne ? 0.3 : 1) * dt);
+    if (!this.jets && !this.dashing) this.energy = Math.min(1, this.energy + MECH.energyRegen * this.energyMul * (this.airborne ? 0.3 : 1) * dt);
     const k = Math.min(1, 6 * dt);
     this.upX += (g.nx * 0.35 - this.upX) * k; // mechs stay mostly upright
     this.upY += (1 - this.upY) * k;

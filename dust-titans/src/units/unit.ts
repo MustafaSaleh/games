@@ -89,8 +89,10 @@ export interface Unit {
   reset(x: number, z: number, heading: number, ground: Ground): void;
   step(dt: number, inp: UnitInput, ground: Ground): void;
   muzzle(out: Muzzle, spread?: number): void;
-  /** multiply the reload after a shot (rapid-fire power-up) */
+  /** multiply the reload after a shot (rapid-fire power-up, upgrades) */
   reloadScale: number;
+  /** energy regeneration multiplier (upgrade) */
+  energyMul: number;
 }
 
 /** Colour schemes for both units. */
@@ -110,5 +112,18 @@ export const LIVERIES: Livery[] = [
   { id: 'galaxy', name: 'Galaxy', body: 0x6c4bd1, stripe: 0xff5fc8, dark: 0x1f1a33, glow: 0xffa8ec },
   { id: 'snow', name: 'Snow', body: 0xeef2f5, stripe: 0xe53935, dark: 0x2f3542, glow: 0xffffff },
 ];
+
+/** Garage upgrades bought with coins: 3 levels each */
+export type UpgradeId = 'armour' | 'reload' | 'energy';
+export interface Upgrades {
+  armour: number;
+  reload: number;
+  energy: number;
+}
+export const UPGRADES: Record<UpgradeId, { name: string; icon: string; per: string; costs: number[] }> = {
+  armour: { name: 'Armour', icon: '🛡️', per: '-8% damage taken per level', costs: [150, 400, 900] },
+  reload: { name: 'Reload', icon: '⚡', per: '7% faster firing per level', costs: [150, 400, 900] },
+  energy: { name: 'Energy', icon: '🔋', per: '+15% jets / dash / turbo energy per level', costs: [150, 400, 900] },
+};
 
 export const liveryById = (id: string): Livery => LIVERIES.find((l) => l.id === id) ?? LIVERIES[0];

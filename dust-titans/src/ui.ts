@@ -3,9 +3,10 @@ import { settings, updateSettings, isTouchDevice } from '@engine/core/settings';
 import { load, save } from '@engine/core/storage';
 import { MECH_SPEC } from './units/mech';
 import { TANK_SPEC } from './units/tank';
-import { LIVERIES, liveryById, type UnitKind, type UnitSpec } from './units/unit';
+import { LIVERIES, UPGRADES, liveryById, type UnitKind, type UnitSpec, type UpgradeId, type Upgrades } from './units/unit';
 import * as THREE from 'three';
 import { EMOTES, HOST_ID, MODES, type Mode, type Room, type Side } from './net/room';
+import { ARENAS, arenaById } from './arena';
 
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -26,6 +27,12 @@ export interface Loadout {
 }
 
 export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC };
+
+export function loadUpgrades(): Upgrades {
+  const u = load<Partial<Upgrades>>('titans.upgrades', {});
+  const c = (v: unknown) => Math.max(0, Math.min(3, Math.floor(Number(v) || 0)));
+  return { armour: c(u.armour), reload: c(u.reload), energy: c(u.energy) };
+}
 
 export function loadLoadout(): Loadout {
   const l = load<Partial<Loadout>>('titans.loadout', {});
@@ -131,6 +138,7 @@ export interface MenuHandlers {
   setMode(m: Mode): void;
   setSide(s: Side): void;
   toRoom(): void;
+  pickArena(id: string): void;
   emote(i: number): void;
   loadoutChanged(l: Loadout): void;
   resume(): void;
@@ -146,7 +154,9 @@ export class TitansMenu {
   private hero: HTMLDivElement;
   private character: CharacterView | null = null;
   current = '';
-  result = { wave: 1, score: 0, best: 0, record: false };
+  result = { wave: 1, score: 0, best: 0, record: false, coins: 0 };
+  coins = Math.max(0, Math.floor(load<number>('titans.coins', 0)));
+  ups: Upgrades = loadUpgrades();
   loadout: Loadout = loadLoadout();
   /** online */
   room: Room | null = null;
@@ -154,8 +164,10 @@ export class TitansMenu {
   netError = '';
   codeHint = '';
   shareUrl = '';
-  mpResult: { title: string; sub: string; rows: ResultRow[]; teams?: { blue: number; red: number } } | null = null;
+  mpResult: { title: string; sub: string; rows: ResultRow[]; teams?: { blue: number; red: number }; coins?: number } | null = null;
   private keep: Record<string, string> = {};
+  /** solo battlefield */
+  arena = load<string>('titans.arena', 'desert-bowl');
 
   constructor(
     parent: HTMLElement,
@@ -212,7 +224,8 @@ export class TitansMenu {
       html = `<div class="logo"><span>DUST</span> TITANS</div>
         <div class="tagline">Tanks & robot suits · defend the arena · co-op and battles</div>
         <div class="btn-col">
-          <button class="btn primary" data-act="play">▶ Play: Desert Bowl<small>Survive the waves · Giant Robot every 5th wave</small></button>
+          <button class="btn primary" data-act="play">▶ Play: ${arenaById(this.arena).name}<small>Survive the waves · Giant Robot every 5th wave</small></button>
+          <button class="btn" data-act="arenas">🗺️ Battlefield<small>${arenaById(this.arena).icon} ${arenaById(this.arena).name}</small></button>
           <button class="btn" data-act="online">👥 Play with friends<small>Co-op, arena and alliance battles online</small></button>
           <button class="btn" data-act="garage">🛠️ Garage<small>${SPECS[this.loadout.unit].name} · ${liveryById(this.loadout.livery).name}</small></button>
           <button class="btn" data-act="how">How to play</button>
@@ -252,8 +265,23 @@ export class TitansMenu {
           <div class="tt-ability">${sp.ability}</div></button>`;
       html = `<h2>Garage</h2>
         <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}</div>
+        <div class="tt-upgrades"><div class="tt-coins">🪙 ${this.coins} coins</div>
+          ${(Object.keys(UPGRADES) as UpgradeId[])
+            .map((id) => {
+              const u = UPGRADES[id],
+                lv = this.ups[id],
+                cost = u.costs[lv];
+              return `<div class="tt-up"><span>${u.icon}</span><div><b>${u.name}</b> <i>${'●'.repeat(lv)}${'○'.repeat(3 - lv)}</i><small>${u.per}</small></div>${
+                lv >= 3 ? '<em>MAX</em>' : `<button class="btn tiny" data-buy="${id}" ${this.coins >= cost ? '' : 'disabled'}>🪙 ${cost}</button>`
+              }</div>`;
+            })
+            .join('')}
+          <small class="muted">Earn coins in every battle. Upgrades work for both units.</small></div>
         <div class="muted small">Colours</div>
         <div class="tt-liveries">${LIVERIES.map((v) => `<button class="tt-livery ${v.id === l.livery ? 'sel' : ''}" data-livery="${v.id}" title="${v.name}" style="background:linear-gradient(135deg,#${v.body.toString(16).padStart(6, '0')} 55%,#${v.stripe.toString(16).padStart(6, '0')} 55%)"></button>`).join('')}</div>
+        <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
+    } else if (s === 'arenas') {
+      html = `<h2>Choose a battlefield</h2><div class="tt-arenas">${ARENAS.map((a) => `<button class="tt-arena ${a.id === this.arena ? 'sel' : ''}" data-arena="${a.id}"><span>${a.icon}</span><b>${a.name}</b><small>${a.description}</small></button>`).join('')}</div>
         <div class="btn-row"><button class="btn primary" data-act="back">Done</button></div>`;
     } else if (s === 'online') {
       const name = esc(this.keep['tt-name'] ?? load<string>('mp.name', ''));
@@ -294,6 +322,7 @@ export class TitansMenu {
         <div class="tt-share"><button class="btn tiny" data-act="share">📤 Share invite</button>${host && !r.serverOnline ? '<span class="tt-error">Reconnecting to the room server…</span>' : ''}</div>
         <div class="tt-players">${rows}</div>
         <div class="tt-modes">${modes}</div>
+        <label class="tt-field tt-arena-pick">Battlefield ${host ? `<select data-arena-select>${ARENAS.map((a) => `<option value="${a.id}" ${a.id === r.arena ? 'selected' : ''}>${a.icon} ${a.name}</option>`).join('')}</select>` : `<b>${arenaById(r.arena).icon} ${esc(arenaById(r.arena).name)}</b>`}</label>
         ${sides}
         <div class="tt-emote-row">${EMOTES.map((e, i) => `<button data-emote="${i}">${e}</button>`).join('')}</div>
         <div class="btn-col">
@@ -309,6 +338,7 @@ export class TitansMenu {
         .join('');
       html = `<h2 class="record">${esc(R.title)}</h2>
         <div class="result-line">${esc(R.sub)}</div>
+        ${R.coins ? `<div class="tt-earned">+${R.coins} 🪙</div>` : ''}
         ${R.teams ? `<div class="tt-teams"><span style="color:${SIDE_COLORS.blue}">Blue ${R.teams.blue}</span> · <span style="color:${SIDE_COLORS.red}">Red ${R.teams.red}</span></div>` : ''}
         <div class="tt-players">${rows}</div>
         <div class="btn-col">
@@ -326,6 +356,7 @@ export class TitansMenu {
         <div class="result-big">${r.score}</div>
         <div class="result-line">You reached wave ${r.wave}</div>
         <div class="result-line">Best ${Math.max(r.best, r.score)}</div>
+        ${r.coins ? `<div class="tt-earned">+${r.coins} 🪙</div>` : ''}
         <div class="btn-col">
           <button class="btn primary" data-act="play">Play again</button>
           <button class="btn ghost" data-act="quit">Menu</button>
@@ -336,8 +367,26 @@ export class TitansMenu {
   }
 
   private onClick(e: Event): void {
+    const buy = (e.target as HTMLElement).closest<HTMLElement>('[data-buy]');
+    if (buy) {
+      const id = buy.dataset.buy as UpgradeId;
+      const cost = UPGRADES[id]?.costs[this.ups[id]];
+      if (cost != null && this.coins >= cost) {
+        this.coins -= cost;
+        this.ups[id]++;
+        save('titans.coins', this.coins);
+        save('titans.upgrades', this.ups);
+      }
+      return this.render();
+    }
     const em = (e.target as HTMLElement).closest<HTMLElement>('[data-emote]');
     if (em) return this.h.emote(+em.dataset.emote!);
+    const ar = (e.target as HTMLElement).closest<HTMLElement>('[data-arena]');
+    if (ar) {
+      this.arena = ar.dataset.arena!;
+      this.h.pickArena(this.arena);
+      return this.render();
+    }
     const md = (e.target as HTMLElement).closest<HTMLElement>('[data-mode]');
     if (md) return this.h.setMode(md.dataset.mode as Mode);
     const sd = (e.target as HTMLElement).closest<HTMLElement>('[data-side]');
@@ -373,7 +422,15 @@ export class TitansMenu {
     else if (act === 'start') this.h.startRoom();
     else if (act === 'toroom') this.h.toRoom();
     else if (act === 'share') this.share();
-    else if (act === 'how' || act === 'settings' || act === 'garage') this.show(act);
+    else if (act === 'how' || act === 'settings' || act === 'garage' || act === 'arenas') this.show(act);
+  }
+
+  /** add coins earned in a battle; returns them */
+  earn(n: number): number {
+    n = Math.max(0, Math.floor(n));
+    this.coins += n;
+    save('titans.coins', this.coins);
+    return n;
   }
 
   /** re-render the current screen, keeping what was typed */
@@ -401,6 +458,7 @@ export class TitansMenu {
 
   private onChange(e: Event): void {
     const el = e.target as HTMLInputElement | HTMLSelectElement;
+    if (el.dataset?.arenaSelect !== undefined) return this.h.pickArena(el.value);
     const key = el.dataset?.set;
     if (!key) return;
     const v = el instanceof HTMLInputElement && el.type === 'checkbox' ? el.checked : el.value;

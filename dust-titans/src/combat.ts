@@ -100,6 +100,9 @@ export class Projectiles {
     }
   }
 
+  /** shots that fly further than this from the centre vanish (never reach the landmarks) */
+  bound = Infinity;
+
   get count(): number {
     return this.shots.length;
   }
@@ -124,6 +127,10 @@ export class Projectiles {
       s.x += s.vx * dt;
       s.y += s.vy * dt;
       s.z += s.vz * dt;
+      if (s.x * s.x + s.z * s.z > this.bound * this.bound) {
+        this.shots.splice(i, 1);
+        continue;
+      }
       let hit: Impact | null = null;
       const rad = cfg.radius;
       for (const t of targets) {

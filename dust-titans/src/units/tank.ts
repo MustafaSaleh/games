@@ -54,6 +54,7 @@ export class Tank implements Unit {
   landed = 0;
   dashing = false;
   reloadScale = 1;
+  energyMul = 1;
   x = 0;
   y = 0;
   z = 0;
@@ -135,7 +136,7 @@ export class Tank implements Unit {
     const fx = Math.sin(this.heading),
       fz = Math.cos(this.heading);
     this.dashing = !!inp.dash && this.energy > 0.05 && this.alive;
-    this.energy = this.dashing ? Math.max(0, this.energy - TANK.turboDrain * dt) : Math.min(1, this.energy + TANK.energyRegen * dt);
+    this.energy = this.dashing ? Math.max(0, this.energy - TANK.turboDrain * dt) : Math.min(1, this.energy + TANK.energyRegen * this.energyMul * dt);
     if (this.dashing && throttle >= 0) throttle = Math.max(throttle, inp.move > 0.08 ? throttle : 1);
     const top = this.dashing ? TANK.turboSpeed : TANK.maxSpeed;
     const acc = this.dashing ? TANK.turboAccel : TANK.accel;

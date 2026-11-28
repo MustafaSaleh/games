@@ -2,7 +2,7 @@
 
 A kid-friendly tank & robot-suit battle game, built on the **Dust Rally** engine (same repository, same style, same multiplayer). You and your friends pilot tanks and giant robot suits to defend famous cities from an alien-machine invasion, team up against waves of drones, robots and giant bosses, or test your skills against each other in arena battles. **Mody (#08)** is the pilot.
 
-**Play:** https://mustafasaleh.github.io/games/dust-titans/ (from phase 1 on)
+**Play:** https://mustafasaleh.github.io/games/dust-titans/
 
 ---
 
@@ -69,8 +69,9 @@ Each phase ends with something playable and deployed.
 - [x] **3. Enemies + bosses:** robot walkers (laser bursts, red-visor warning), jelly aliens (zig-zag hops, zap on touch), power-ups (repair, shield, rapid fire, triple shot), the Giant Robot every 5th wave (knees, then the shielded chest core; plasma volleys; stomp shockwaves to jump over).
 - [x] **4. Co-op multiplayer:** online rooms for up to 4 (room code + share link, names and emojis only, no chat). The host runs the enemies, waves and crates; every device drives its own unit and decides when it is hit. Knocked-out players respawn next to a teammate; you watch a teammate meanwhile. *(Split-screen co-op on one device: later.)*
 - [x] **5. PvP + alliances:** *Arena battle* (everyone for themselves, 3 minutes or 10 knock-outs, crates drop from the sky) and *Alliance battle* (Blue vs Red with enemy waves, 4 minutes, points = enemies + 1000 per knock-out). Respawn after 4 s with a short shield, live scoreboard, name tags, results screen, back to the room.
-- [ ] **6. Cities:** Cairo, Riyadh, Dubai arena maps (landmark-inspired, never damaged).
-- [ ] **7. Polish:** upgrades and coins, missions, more weapons/abilities, battle music themes, effects.
+- [x] **6. Cities + more arenas:** 8 battlefields. **Cairo · Nile Bank** (the Nile winds through: wade or jump; palms, sailboats, market stalls; pyramids, a lotus tower, minarets and domes on the horizon), **Riyadh · Edge of the World** (a plateau with a ramp: robot suits jump up, tanks drive up; sky-bridge tower and gold-sphere tower), **Dubai · Marina Nights** (night, neon towers, beach and shallow sea, the super-tall stepped tower, the sail hotel, the palm island), plus Desert Bowl, Forest Clearing, Frozen Lake, Redwood Grove, Ghost Town. Landmarks stand outside the arena and shots that leave the arena vanish, so they're never damaged.
+- [x] **7. Polish (first pass):** coins from every battle, Garage upgrades (armour, reload, energy; 3 levels each), music per arena, night lighting, water splashes.
+- [ ] **Next ideas:** split-screen co-op, missions (escort a truck across Ghost Bay, defend a market in Cairo), more weapons (laser, rocket swarm, EMP, shield bubble), the Scout unit (Dust Rally cars with a mini turret), the Tomato cannon silly mode, offline bot players for Arena practice.
 
 ## Mech design: image prompt
 
