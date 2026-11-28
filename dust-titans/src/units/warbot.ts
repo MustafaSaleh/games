@@ -19,14 +19,14 @@ export const WARBOT = {
   spinUp: 1.1, // s to full speed
   spinDown: 0.8,
   shotSpeed: 95,
-  muzzleHeight: 4.2,
-  muzzleForward: 3.3,
-  muzzleSide: 2.0, // right arm
+  muzzleHeight: 3.7,
+  muzzleForward: 3.6,
+  muzzleSide: 1.6, // right arm
   /** a homing missile leaves the shoulder pod every few seconds at full spin */
   missileEvery: 2.4,
   gravity: 26,
   /** ground slam: wind up, then smash */
-  slamWindup: 0.42,
+  slamWindup: 0.6,
   slamCost: 0.5,
   slamCooldown: 1.4,
   slamRadius: 9,
