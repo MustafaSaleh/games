@@ -1,6 +1,7 @@
 import { HANDLING as H } from '../config/handling';
 import { SURFACES } from '../config/surfaces';
 import { clamp, smoothstep } from '../core/math';
+import { BASE_SPEC, type CarSpec } from '../config/cars';
 import { ColliderHits, makeGroundSample, type GroundSample, type Terrain } from '../world/terrain';
 import { resolveCircleColliders } from './collisions';
 
@@ -23,6 +24,11 @@ export type Ground = Pick<Terrain, 'sample' | 'heightAt' | 'queryColliders'>;
  * Conventions: forward = (sin h, cos h) on XZ, right = (-cos h, sin h). +steer = right.
  */
 export class Car {
+  /** this car's performance (config/cars.ts) */
+  spec: CarSpec = BASE_SPEC;
+  get mass(): number {
+    return this.spec.mass;
+  }
   x = 0;
   y = 0;
   z = 0;
@@ -96,6 +102,12 @@ export class Car {
     this.pHeading = this.heading;
     const g = ground.sample(this.x, this.z, this.ground);
     const surf = SURFACES[g.surface];
+    // per-car performance: tarmac grip vs loose-surface grip/traction
+    const sp = this.spec;
+    const loose = surf.id !== 'tarmac';
+    const gripMul = loose ? sp.offroad : sp.grip;
+    const tracMul = loose ? Math.sqrt(sp.offroad) : 1;
+    const top = H.topSpeed * sp.topSpeed;
     this.surface = g.surface;
     this.edge = g.edge;
     this.throttle = inp.throttle;
@@ -109,9 +121,9 @@ export class Car {
     const absF = Math.abs(vF);
 
     // ---------------- yaw ----------------
-    this.steerAngle = (inp.steer * H.maxSteer) / (1 + absF * H.steerSpeedFalloff);
+    this.steerAngle = (inp.steer * H.maxSteer * sp.steer) / (1 + absF * H.steerSpeedFalloff);
     if (!this.airborne) {
-      const grip = surf.grip;
+      const grip = surf.grip * gripMul;
       const slip = speed > 2 ? Math.atan2(Math.abs(vL), absF) : 0;
       this.slide = smoothstep(H.slideAngle * 0.6, H.slideAngle * 1.5, slip);
       let target = -(vF / H.wheelBase) * Math.tan(this.steerAngle);
@@ -147,10 +159,10 @@ export class Car {
     // ---------------- forces ----------------
     let aF = 0;
     if (!this.airborne) {
-      const trac = surf.traction;
-      if (inp.throttle > 0 && vF < H.topSpeed) {
-        const r = Math.max(vF, 0) / H.topSpeed;
-        aF += H.engineAccel * trac * inp.throttle * (1 - r * r);
+      const trac = Math.min(1.15, surf.traction * tracMul);
+      if (inp.throttle > 0 && vF < top) {
+        const r = Math.max(vF, 0) / top;
+        aF += H.engineAccel * sp.power * trac * inp.throttle * (1 - r * r);
       }
       if (inp.brake > 0) {
         if (vF > 0.5) aF -= H.brakeDecel * trac * inp.brake;
@@ -160,9 +172,9 @@ export class Car {
       if (inp.handbrake) aF -= Math.sign(vF) * Math.min(H.handbrakeDecel, Math.abs(vF) / dt);
       let nF = vF + aF * dt;
       if (inp.brake > 0 && vF > 0.5 && nF < 0) nF = 0;
-      nF *= 1 - surf.rollDrag * dt;
+      nF *= 1 - (loose ? surf.rollDrag / sp.offroad : surf.rollDrag) * dt;
       // lateral grip
-      let latGrip = H.lateralGrip * surf.grip * (1 + (H.slideGrip - 1) * this.slide);
+      let latGrip = H.lateralGrip * surf.grip * gripMul * (1 + (H.slideGrip - 1) * this.slide);
       if (inp.handbrake) latGrip *= H.handbrakeGrip;
       const nL = vL * Math.exp(-latGrip * dt);
       const scrub = Math.abs(vL) - Math.abs(nL);

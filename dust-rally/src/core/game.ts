@@ -262,6 +262,7 @@ export class Game {
   private carKey = '';
   /** Rebuild the player + ghost car when the garage selection changes. */
   private applyCar(): void {
+    this.car.spec = getStyle(settings.carStyle).spec;
     const key = settings.carStyle + '/' + settings.carLivery;
     if (key === this.carKey) return;
     const first = this.carKey === '';
@@ -388,6 +389,7 @@ export class Game {
     this.input.scheme = split ? 'p1' : 'all';
     if (split) {
       const p2 = (this.p2 = new LocalRacer('P2', otherLivery(settings.carLivery), settings.carStyle, this.r3.scene));
+      p2.car.spec = getStyle(settings.carStyle).spec;
       const g2 = gridSlot(tr, startIdx, 1, false);
       p2.car.reset(g2.x, g2.z, g2.heading, terrain);
       p2.cam.snap(g2.x, p2.car.y, g2.z, g2.heading);
@@ -582,6 +584,7 @@ export class Game {
     const b = this.remoteBody;
     for (const r of this.remotes.values()) {
       if (r.gone || r.finishTime != null || !r.body(now, b)) continue;
+      b.mass = getStyle(r.player.style).spec.mass;
       if (resolveCarCar(this.car, b, false, this.contact)) this.carContact(this.contact, null);
     }
   }
@@ -714,7 +717,7 @@ export class Game {
       vx: car.vx,
       vz: car.vz,
       heading: car.heading,
-      mass: 1100,
+      mass: car.spec.mass,
       push: (dx, dz) => {
         car.vx += dx;
         car.vz += dz;

@@ -1374,3 +1374,47 @@ input:not([type]) {
 .stage-tile.biome-city {
   background: linear-gradient(160deg, #c4452f, #3a3b40 70%);
 }
+
+/* garage: car performance */
+.chips {
+  flex-wrap: wrap;
+}
+.chips .chip {
+  flex: 1 1 28%;
+}
+.car-stats {
+  display: grid;
+  gap: 5px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.stat-row {
+  display: grid;
+  grid-template-columns: 78px 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.stat-row i {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.stat-row b {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  transition: width 0.3s;
+}
+.stat-row em {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.75;
+  text-align: right;
+}

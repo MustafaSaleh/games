@@ -40,6 +40,15 @@ describe('car vs car collisions', () => {
     expect(b.z).toBe(1.9);
   });
 
+  it('a heavy truck shoves a light buggy (momentum is still conserved)', () => {
+    const truck = { ...car(0, -1.9, 0, 0, 10), mass: 1750 };
+    const buggy = { ...car(0, 1.9, Math.PI, 0, -10), mass: 700 };
+    resolveCarCar(truck, buggy, true, makeContact());
+    expect(Math.abs(buggy.vz - -10)).toBeGreaterThan(Math.abs(truck.vz - 10) * 2); // the buggy's speed changes much more
+    expect(truck.vz).toBeGreaterThan(0); // the truck keeps going forward
+    expect(truck.vz * 1750 + buggy.vz * 700).toBeCloseTo(10 * 1750 - 10 * 700, 3);
+  });
+
   it('far apart or one car flying over: no contact', () => {
     expect(resolveCarCar(car(0, 0, 0), car(10, 0, 0), true, makeContact())).toBe(false);
     const a = car(0, 0, 0);

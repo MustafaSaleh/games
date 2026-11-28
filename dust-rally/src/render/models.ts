@@ -370,10 +370,81 @@ function truck(parts: Parts, L: Livery): void {
   lights(parts, 2.16, -2.16, 0.95 + y0, 0.65);
 }
 
+/** two bucket seats with headrests (open cars) */
+function seats(parts: Parts, y: number, z: number): void {
+  for (const x of [-0.38, 0.38]) {
+    parts.push(colorGeo(box(0.5, 0.16, 0.55, x, y, z), 0x1f1f23));
+    parts.push(colorGeo(new THREE.BoxGeometry(0.5, 0.62, 0.13).rotateX(-0.18).translate(x, y + 0.36, z - 0.3), 0x1f1f23));
+    parts.push(colorGeo(box(0.3, 0.2, 0.12, x, y + 0.75, z - 0.37), 0x2c2c32));
+  }
+}
+
+/** Open-top two-seat roadster: long bonnet, windscreen, roll hoops behind the seats. */
+function roadster(parts: Parts, L: Livery): void {
+  parts.push(colorGeo(box(1.82, 0.42, 3.9, 0, 0.48, 0), L.body));
+  parts.push(colorGeo(taperBox(1.7, 0.16, 1.5, 0.95, 0.9, 0.05).translate(0, 0.77, 1.1), L.body)); // bonnet
+  parts.push(colorGeo(box(1.7, 0.2, 1.05, 0, 0.79, -1.38), L.body)); // rear deck
+  parts.push(colorGeo(box(1.5, 0.08, 1.25, 0, 0.72, -0.2), 0x2a2a2e)); // open cockpit floor
+  parts.push(colorGeo(box(0.14, 0.22, 1.3, 0.84, 0.8, -0.2), L.body)); // door tops
+  parts.push(colorGeo(box(0.14, 0.22, 1.3, -0.84, 0.8, -0.2), L.body));
+  seats(parts, 0.82, -0.12);
+  // roll hoops
+  for (const x of [-0.38, 0.38]) {
+    parts.push(colorGeo(box(0.08, 0.55, 0.08, x - 0.24, 1.15, -0.72), L.stripe));
+    parts.push(colorGeo(box(0.08, 0.55, 0.08, x + 0.24, 1.15, -0.72), L.stripe));
+    parts.push(colorGeo(box(0.56, 0.08, 0.08, x, 1.44, -0.72), L.stripe));
+  }
+  // windscreen: frame + tinted glass, raked back
+  parts.push(colorGeo(new THREE.BoxGeometry(1.46, 0.4, 0.04).rotateX(-0.55).translate(0, 1.0, 0.5), 0x9fc8e0));
+  parts.push(colorGeo(new THREE.BoxGeometry(1.52, 0.06, 0.06).translate(0, 1.18, 0.4), L.stripe));
+  // stripes, bumpers, mirrors
+  parts.push(colorGeo(box(0.32, 0.02, 1.52, 0, 0.86, 1.1), L.stripe));
+  parts.push(colorGeo(box(0.32, 0.02, 1.07, 0, 0.9, -1.38), L.stripe));
+  parts.push(colorGeo(box(1.86, 0.18, 0.18, 0, 0.34, 1.98), L.stripe));
+  parts.push(colorGeo(box(1.86, 0.18, 0.18, 0, 0.34, -1.98), L.stripe));
+  parts.push(colorGeo(box(0.14, 0.1, 0.18, 0.98, 0.98, 0.35), L.stripe));
+  parts.push(colorGeo(box(0.14, 0.1, 0.18, -0.98, 0.98, 0.35), L.stripe));
+  lights(parts, 1.98, -1.98, 0.6, 0.6);
+}
+
+/** Two-seat dune buggy: tube roll cage, open sides, engine at the back, big wheels. */
+function buggy(parts: Parts, L: Livery): void {
+  const tube = L.stripe;
+  parts.push(colorGeo(box(1.5, 0.14, 3.3, 0, 0.62, -0.05), 0x2a2a2e)); // floor pan
+  parts.push(colorGeo(taperBox(1.4, 0.36, 1.05, 0.78, 0.7, 0).translate(0, 0.86, 1.3), L.body)); // nose
+  parts.push(colorGeo(box(0.24, 0.34, 1.7, 0.74, 0.84, -0.15), L.body)); // side pods
+  parts.push(colorGeo(box(0.24, 0.34, 1.7, -0.74, 0.84, -0.15), L.body));
+  parts.push(colorGeo(box(1.3, 0.42, 0.9, 0, 0.95, -1.4), L.body)); // engine cover
+  parts.push(colorGeo(box(0.9, 0.22, 0.6, 0, 1.25, -1.45), 0x3a3a40)); // engine
+  for (const x of [-0.3, 0.3]) parts.push(colorGeo(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6).rotateX(Math.PI / 2).translate(x, 0.95, -1.95), 0x9a9aa2)); // exhausts
+  seats(parts, 0.78, -0.2);
+  // roll cage: four posts, top frame, cross bars, A-pillars down to the nose
+  const post = (x: number, z: number) => parts.push(colorGeo(box(0.08, 1.15, 0.08, x, 1.27, z), tube));
+  post(0.68, 0.32);
+  post(-0.68, 0.32);
+  post(0.68, -0.8);
+  post(-0.68, -0.8);
+  parts.push(colorGeo(box(0.08, 0.08, 1.2, 0.68, 1.85, -0.24), tube));
+  parts.push(colorGeo(box(0.08, 0.08, 1.2, -0.68, 1.85, -0.24), tube));
+  parts.push(colorGeo(box(1.44, 0.08, 0.08, 0, 1.85, 0.32), tube));
+  parts.push(colorGeo(box(1.44, 0.08, 0.08, 0, 1.85, -0.8), tube));
+  parts.push(colorGeo(new THREE.BoxGeometry(0.08, 0.08, 1.05).rotateX(0.78).translate(0.6, 1.47, 0.68), tube));
+  parts.push(colorGeo(new THREE.BoxGeometry(0.08, 0.08, 1.05).rotateX(0.78).translate(-0.6, 1.47, 0.68), tube));
+  parts.push(colorGeo(new THREE.BoxGeometry(1.44, 0.07, 0.07).rotateZ(0.5).translate(0, 1.6, -0.8), tube)); // diagonal
+  // light bar on the cage + front bumper tube
+  for (const x of [-0.42, -0.14, 0.14, 0.42])
+    parts.push(colorGeo(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 6).rotateX(Math.PI / 2).translate(x, 1.95, 0.36), 0xfffbe8));
+  parts.push(colorGeo(box(1.4, 0.1, 0.1, 0, 0.62, 1.88), tube));
+  parts.push(colorGeo(box(0.3, 0.02, 1.0, 0, 1.05, 1.3), L.stripe));
+  lights(parts, 1.84, -1.86, 0.84, 0.45);
+}
+
 const WHEELS: Record<CarStyle, { r: number; w: number; x: number; z: number }> = {
   hatch: { r: 0.36, w: 0.28, x: 0.82, z: 1.25 },
   coupe: { r: 0.35, w: 0.32, x: 0.86, z: 1.35 },
   truck: { r: 0.5, w: 0.36, x: 0.92, z: 1.4 },
+  roadster: { r: 0.34, w: 0.3, x: 0.84, z: 1.3 },
+  buggy: { r: 0.47, w: 0.4, x: 0.98, z: 1.28 },
 };
 
 /** Build a car of the given style and livery, facing +z, ~4 m long. */
@@ -382,6 +453,8 @@ export function buildCar(style: CarStyle, livery: Livery, ghost = false): CarMod
   rearLamps.length = 0;
   if (style === 'coupe') coupe(parts, livery);
   else if (style === 'truck') truck(parts, livery);
+  else if (style === 'roadster') roadster(parts, livery);
+  else if (style === 'buggy') buggy(parts, livery);
   else hatch(parts, livery);
 
   const bodyGeo = mergeGeometries(parts, false)!;

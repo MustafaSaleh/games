@@ -56,6 +56,8 @@ export function resolveCircleColliders(b: Body, cx: number, cz: number, r: numbe
 /** A car as seen by car-vs-car collisions (two circles along the heading). */
 export interface CarBody extends Body {
   heading: number;
+  /** kg (default: equal masses) */
+  mass?: number;
 }
 
 /** Where two cars touched, for sparks / sound. */
@@ -135,19 +137,22 @@ export function resolveCarCar(a: CarBody, b: CarBody, bMovable: boolean, out: Ca
       out.nz = nz;
       out.scrape = Math.max(out.scrape, Math.abs(vt));
       if (vn < 0) {
-        // equal-mass impulse (per car) and a little tangential friction
-        const jn = (-(1 + H.carRestitution) * vn) / 2;
-        const jt = -vt * H.carFriction * 0.5;
+        // impulse by masses (a heavy truck shoves a light buggy) + a little tangential friction
+        const ma = a.mass ?? 1,
+          mb = b.mass ?? 1;
+        const mu = (ma * mb) / (ma + mb); // reduced mass
+        const jn = -(1 + H.carRestitution) * vn * mu;
+        const jt = -vt * H.carFriction * mu;
         const ix = nx * jn + tx * jt,
           iz = nz * jn + tz * jt;
-        a.vx += ix;
-        a.vz += iz;
+        a.vx += ix / ma;
+        a.vz += iz / ma;
         // spin from an off-centre hit (same convention as obstacle hits)
-        a.yawRate += ((cz - a.z) * ix - (cx - a.x) * iz) * H.carSpin;
+        a.yawRate += ((cz - a.z) * ix - (cx - a.x) * iz) * H.carSpin / ma;
         if (bMovable) {
-          b.vx -= ix;
-          b.vz -= iz;
-          b.yawRate += ((cz - b.z) * -ix - (cx - b.x) * -iz) * H.carSpin;
+          b.vx -= ix / mb;
+          b.vz -= iz / mb;
+          b.yawRate += ((cz - b.z) * -ix - (cx - b.x) * -iz) * H.carSpin / mb;
         }
         out.impact = Math.max(out.impact, -vn);
       }
