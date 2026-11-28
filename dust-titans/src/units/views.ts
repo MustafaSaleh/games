@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { clamp, lerp, lerpAngle } from '@engine/core/math';
 import type { Mech } from './mech';
 import type { Scout } from './scout';
+import type { Warbot } from './warbot';
 import { buildCar, disposeCar, type CarModel } from '@engine/render/models';
 import { buildTank, type TankModel } from './tankModel';
 import type { Livery, Unit, UnitKind } from './unit';
@@ -286,5 +287,265 @@ export class ScoutView implements UnitView {
 }
 
 export function makeUnitView(kind: UnitKind, l: Livery): UnitView {
-  return kind === 'mech' ? new MechView(l) : kind === 'scout' ? new ScoutView(l) : new TankView(l);
+  return kind === 'mech' ? new MechView(l) : kind === 'scout' ? new ScoutView(l) : kind === 'warbot' ? new WarbotView(l) : new TankView(l);
+}
+
+/* ------------------------------------------------------------------ */
+/* Warbot model                                                         */
+/* ------------------------------------------------------------------ */
+
+/** mix two colours: weathered olive armour tinted toward the livery */
+function mixHex(a: number, b: number, t: number): number {
+  return new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
+}
+
+/** a number painted on a shoulder plate */
+function decal(text: string, color: string): THREE.CanvasTexture | null {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 64;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.fillStyle = color;
+  g.font = 'bold 50px Arial, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, 64, 34);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * Warbot: a heavy armoured war walker — boxy chest with vents, numbered shoulder plates,
+ * a small head with a blue visor, a 6-barrel gatling with ammo drum, belt and missile pod
+ * on the right arm and a blaster forearm with a big fist on the left.
+ */
+export class WarbotView implements UnitView {
+  readonly root = new THREE.Group();
+  private pelvis = new THREE.Group();
+  private torso = new THREE.Group();
+  private gun = new THREE.Group();
+  private barrels = new THREE.Group();
+  private arm = new THREE.Group();
+  private legs: Leg[] = [];
+  private geos: THREE.BufferGeometry[] = [];
+  private mats: THREE.Material[] = [];
+  private tex: THREE.Texture[] = [];
+  private lean = 0;
+  private crouch = 0;
+  private spinA = 0;
+  private spinV = 0;
+
+  constructor(l: Livery) {
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0x5fd0ff });
+    this.mats.push(mat, glowMat);
+    const mesh = (parts: THREE.BufferGeometry[], m: THREE.Material = mat) => {
+      const g = mergeGeometries(parts, false)!;
+      g.computeVertexNormals();
+      this.geos.push(g);
+      return new THREE.Mesh(g, m);
+    };
+    const glow = (geo: THREE.BufferGeometry) => mesh([colored(geo, 0xffffff)], glowMat);
+    const armor = mixHex(0x5f6540, l.body, 0.3);
+    const armor2 = mixHex(0x4a4f33, l.body, 0.22);
+    const rust = 0x8a5a2b;
+    const steel = 0x4b5052;
+    const brass = 0xc79a3a;
+    const stripe = l.stripe;
+    const cyl = (rt: number, rb: number, h: number, seg = 8) => new THREE.CylinderGeometry(rt, rb, h, seg);
+
+    // ---- legs: chunky thighs, knee pads, big feet ----
+    this.pelvis.position.y = 3.0;
+    this.root.add(this.pelvis);
+    this.pelvis.add(
+      mesh([
+        colored(box(2.3, 0.75, 1.35, 0, 0, 0), steel),
+        colored(box(1.3, 0.7, 0.22, 0, -0.15, 0.75), armor), // front skirt
+        colored(box(1.32, 0.1, 0.24, 0, 0.18, 0.76), rust),
+        colored(box(1.0, 0.6, 0.22, 0, -0.1, -0.75), armor2),
+      ]),
+    );
+    for (const s of [1, -1]) {
+      const hip = new THREE.Group();
+      hip.position.set(s * 1.05, -0.1, 0);
+      hip.add(
+        mesh([
+          colored(cyl(0.45, 0.45, 0.9, 10).rotateZ(Math.PI / 2), steel),
+          colored(box(0.95, 1.55, 1.05, s * 0.05, -0.75, 0), armor),
+          colored(box(1.0, 0.5, 0.2, s * 0.05, -0.55, 0.56), armor2), // thigh plate
+          colored(box(0.2, 0.9, 0.7, s * 0.55, -0.7, 0), rust),
+        ]),
+      );
+      const knee = new THREE.Group();
+      knee.position.y = -1.5;
+      knee.add(
+        mesh([
+          colored(new THREE.SphereGeometry(0.42, 8, 6), steel),
+          colored(box(0.85, 0.75, 0.4, 0, -0.05, 0.5), rust), // knee pad
+          colored(box(0.9, 1.35, 1.0, 0, -0.75, 0), armor),
+          colored(box(0.92, 0.55, 0.18, 0, -0.75, 0.55), armor2), // shin plate
+          colored(cyl(0.12, 0.12, 1.1, 6).translate(0, -0.7, -0.6), steel), // calf piston
+          colored(box(1.25, 0.38, 1.95, 0, -1.33, 0.3), steel), // foot
+          colored(box(1.28, 0.3, 0.45, 0, -1.3, 1.2), rust), // toe
+          colored(box(0.9, 0.3, 0.4, 0, -1.3, -0.75), armor2), // heel
+        ]),
+      );
+      hip.add(knee);
+      this.pelvis.add(hip);
+      this.legs.push({ hip, knee });
+    }
+
+    // ---- torso (turns to aim) ----
+    this.pelvis.add(this.torso);
+    const chest: THREE.BufferGeometry[] = [
+      colored(box(1.7, 0.7, 1.3, 0, 0.6, 0), steel), // waist
+      colored(box(3.0, 1.8, 2.1, 0, 1.75, -0.05), armor),
+      colored(box(2.1, 1.0, 0.35, 0, 1.95, 1.08), armor2), // chest plate
+      colored(box(2.12, 0.12, 0.37, 0, 2.48, 1.09), rust),
+      colored(box(1.2, 0.5, 0.3, 0, 1.15, 1.0), armor2), // belly plate
+      colored(box(0.4, 0.1, 0.1, 0, 2.0, 1.28), stripe), // chest badge
+      colored(box(2.0, 1.4, 0.8, 0, 1.75, -1.4), steel), // backpack
+      colored(cyl(0.22, 0.26, 0.9).translate(0.6, 2.7, -1.5), steel), // exhausts
+      colored(cyl(0.22, 0.26, 0.9).translate(-0.6, 2.7, -1.5), steel),
+      // head: small, set low between the shoulders
+      colored(box(0.95, 0.62, 0.85, 0, 2.95, 0.45), armor),
+      colored(box(1.0, 0.16, 0.9, 0, 3.3, 0.45), armor2),
+      colored(box(0.35, 0.4, 0.35, 0.62, 3.05, 0.35), steel), // side sensor
+      colored(cyl(0.03, 0.03, 0.7, 4).translate(-0.3, 3.6, 0.2), steel), // antenna
+    ];
+    // vents on the chest sides
+    for (const s of [1, -1]) for (let i = 0; i < 4; i++) chest.push(colored(box(0.08, 0.1, 1.1, s * 1.52, 1.35 + i * 0.22, 0.1), steel));
+    this.torso.add(mesh(chest));
+    this.torso.add(
+      glow(box(0.62, 0.13, 0.08, 0, 3.0, 0.89)), // visor
+    );
+    this.torso.add(glow(new THREE.CircleGeometry(0.1, 8).translate(0.62, 3.05, 0.53)));
+
+    // ---- shoulder plates with a painted number ----
+    const num = decal('08', '#f3efe2');
+    if (num) this.tex.push(num);
+    const numMat = num ? new THREE.MeshBasicMaterial({ map: num, transparent: true, depthWrite: false }) : null;
+    if (numMat) this.mats.push(numMat);
+    for (const s of [1, -1]) {
+      const p = new THREE.Group();
+      p.position.set(s * 1.95, 2.75, 0);
+      p.rotation.z = -s * 0.22;
+      p.add(
+        mesh([
+          colored(box(1.5, 0.95, 1.75, 0, 0, 0), armor),
+          colored(box(1.52, 0.14, 1.77, 0, -0.42, 0), rust),
+          colored(box(0.1, 0.5, 1.2, s * 0.76, 0.05, 0), armor2),
+        ]),
+      );
+      if (numMat) {
+        const g = new THREE.PlaneGeometry(1.1, 0.55);
+        this.geos.push(g);
+        const d = new THREE.Mesh(g, numMat);
+        d.position.set(s * 0.82, 0.05, 0);
+        d.rotation.y = (s * Math.PI) / 2;
+        p.add(d);
+      }
+      this.torso.add(p);
+    }
+
+    // ---- right arm: gatling (aims with the torso) ----
+    this.gun.position.set(-2.0, 1.2, 0.2);
+    this.gun.add(
+      mesh([
+        colored(box(0.75, 1.0, 0.75, 0, 0.45, -0.1), steel), // upper arm
+        colored(box(1.0, 0.95, 1.8, 0, 0, 0.7), armor), // gun housing
+        colored(box(1.02, 0.12, 1.82, 0, 0.42, 0.7), rust),
+        colored(cyl(0.48, 0.48, 0.5, 12).rotateZ(Math.PI / 2).translate(-0.15, -0.75, 0.35), steel), // ammo drum
+        colored(new THREE.TorusGeometry(0.42, 0.09, 4, 10, Math.PI).rotateY(Math.PI / 2).translate(0, -0.5, 1.0), brass), // belt
+        colored(box(0.75, 0.5, 0.85, 0, 0.75, 0.75), armor2), // missile pod
+        colored(cyl(0.11, 0.11, 0.1, 6).rotateX(Math.PI / 2).translate(-0.18, 0.86, 1.2), 0xd23a2a),
+        colored(cyl(0.11, 0.11, 0.1, 6).rotateX(Math.PI / 2).translate(0.18, 0.86, 1.2), 0xd23a2a),
+        colored(cyl(0.11, 0.11, 0.1, 6).rotateX(Math.PI / 2).translate(-0.18, 0.64, 1.2), 0xd23a2a),
+        colored(cyl(0.11, 0.11, 0.1, 6).rotateX(Math.PI / 2).translate(0.18, 0.64, 1.2), 0xd23a2a),
+        colored(cyl(0.13, 0.13, 1.2, 8).rotateX(Math.PI / 2).translate(0, -0.6, 2.0), 0x6b6a5a), // slung missile
+        colored(new THREE.ConeGeometry(0.13, 0.35, 8).rotateX(Math.PI / 2).translate(0, -0.6, 2.77), 0xc8302a),
+      ]),
+    );
+    // six spinning barrels
+    this.barrels.position.set(0, 0, 1.6);
+    const bp: THREE.BufferGeometry[] = [colored(cyl(0.36, 0.36, 0.2, 10).rotateX(Math.PI / 2).translate(0, 0, 0.1), steel), colored(cyl(0.34, 0.34, 0.16, 10).rotateX(Math.PI / 2).translate(0, 0, 1.45), steel)];
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      bp.push(colored(cyl(0.075, 0.075, 1.7, 6).rotateX(Math.PI / 2).translate(Math.cos(a) * 0.22, Math.sin(a) * 0.22, 0.85), 0x2a2c2e));
+    }
+    bp.push(colored(cyl(0.09, 0.09, 1.7, 6).rotateX(Math.PI / 2).translate(0, 0, 0.85), steel));
+    this.barrels.add(mesh(bp));
+    this.gun.add(this.barrels);
+    this.torso.add(this.gun);
+
+    // ---- left arm: blaster forearm and a big fist ----
+    this.arm.position.set(2.0, 2.2, 0.1);
+    this.arm.add(
+      mesh([
+        colored(cyl(0.32, 0.32, 1.2, 8).translate(0, -0.55, 0), steel), // upper arm
+        colored(new THREE.SphereGeometry(0.38, 8, 6).translate(0, -1.15, 0), steel), // elbow
+        colored(box(0.85, 1.35, 0.85, 0, -1.85, 0.05), armor), // forearm
+        colored(box(0.87, 0.12, 0.87, 0, -1.4, 0.05), rust),
+        colored(cyl(0.15, 0.15, 1.3, 8).translate(0.5, -1.85, 0.2), steel), // blaster tubes
+        colored(cyl(0.12, 0.12, 1.1, 8).translate(0.5, -1.85, -0.15), steel),
+        colored(box(0.95, 0.75, 0.9, 0, -2.85, 0.1), steel), // fist
+        colored(box(0.2, 0.3, 0.92, -0.3, -3.3, 0.1), steel), // fingers
+        colored(box(0.2, 0.3, 0.92, 0, -3.3, 0.1), steel),
+        colored(box(0.2, 0.3, 0.92, 0.3, -3.3, 0.1), steel),
+      ]),
+    );
+    this.arm.add(glow(cyl(0.1, 0.1, 0.12, 8).translate(0.5, -2.55, 0.2)));
+    this.arm.add(glow(cyl(0.08, 0.08, 0.12, 8).translate(0.5, -2.45, -0.15)));
+    this.torso.add(this.arm);
+  }
+
+  update(u: Unit, alpha: number, dt: number): void {
+    const w = u as Warbot;
+    const h = lerpAngle(u.pHeading, u.heading, alpha);
+    pose(this.root, lerp(u.px, u.x, alpha), lerp(u.py, u.y, alpha), lerp(u.pz, u.z, alpha), h, u);
+
+    // heavy stride: one step every 4.4 m
+    const ph = (w.stride / 4.4) * Math.PI * 2;
+    const a = clamp(u.drive, 0, 1) * 0.5;
+    for (let i = 0; i < 2; i++) {
+      const leg = this.legs[i];
+      const p = ph + i * Math.PI;
+      let hip = -Math.sin(p) * a,
+        knee = Math.max(0, Math.cos(p)) * a * 1.4;
+      if (this.crouch > 0.01) {
+        hip -= this.crouch * 0.55;
+        knee += this.crouch * 1.0;
+      }
+      leg.hip.rotation.x += (hip - leg.hip.rotation.x) * Math.min(1, dt * 12);
+      leg.knee.rotation.x += (knee - leg.knee.rotation.x) * Math.min(1, dt * 12);
+    }
+    // slam: crouch and raise the fist while winding up, then smash down
+    const crouchT = u.dashing ? 1 : 0;
+    this.crouch += (crouchT - this.crouch) * Math.min(1, dt * (u.dashing ? 6 : 18));
+    this.pelvis.position.y = 3.0 - Math.abs(Math.cos(ph)) * 0.2 * (a / 0.5) - this.crouch * 0.7;
+    this.lean += (u.drive * 0.08 + this.crouch * 0.25 - this.lean) * Math.min(1, dt * 8);
+    this.pelvis.rotation.x = this.lean;
+    this.pelvis.rotation.z = Math.sin(ph) * 0.05 * (a / 0.5); // sway side to side
+
+    this.torso.rotation.y = lerpAngle(u.pTurret, u.turret, alpha) - h;
+    this.arm.rotation.x = u.dashing ? -2.4 * this.crouch : Math.sin(ph) * a * 0.6;
+
+    // gatling: barrels spin with the trigger; recoil on each shot
+    const target = Math.max(w.spin ?? 0, u.fired ? 0.6 : 0);
+    this.spinV += (target * 40 - this.spinV) * Math.min(1, dt * 4);
+    this.spinA += this.spinV * dt;
+    this.barrels.rotation.z = this.spinA;
+    if (u.fired) this.gun.position.z = 0.05;
+    this.gun.position.z += (0.2 - this.gun.position.z) * Math.min(1, dt * 20);
+  }
+
+  dispose(): void {
+    this.root.removeFromParent();
+    for (const g of this.geos) g.dispose();
+    for (const m of this.mats) m.dispose();
+    for (const t of this.tex) t.dispose();
+  }
 }

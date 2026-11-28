@@ -4,6 +4,7 @@ import { load, save } from '@engine/core/storage';
 import { MECH_SPEC } from './units/mech';
 import { TANK_SPEC } from './units/tank';
 import { SCOUT_SPEC } from './units/scout';
+import { WARBOT_SPEC } from './units/warbot';
 import { LIVERIES, UPGRADES, liveryById, unitKind, type UnitKind, type UnitSpec, type UpgradeId, type Upgrades } from './units/unit';
 import * as THREE from 'three';
 import { EMOTES, HOST_ID, MODES, type Mode, type Room, type Side } from './net/room';
@@ -30,7 +31,7 @@ export interface Loadout {
   special: SpecialId;
 }
 
-export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC, scout: SCOUT_SPEC };
+export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC, scout: SCOUT_SPEC, warbot: WARBOT_SPEC };
 
 export function loadUpgrades(): Upgrades {
   const u = load<Partial<Upgrades>>('titans.upgrades', {});
@@ -306,7 +307,7 @@ export class TitansMenu {
           ${bar('Armour', sp.bars.armour)}${bar('Speed', sp.bars.speed)}${bar('Firepower', sp.bars.firepower)}${bar('Agility', sp.bars.agility)}
           <div class="tt-ability">${sp.ability}</div></button>`;
       html = `<h2>Garage</h2>
-        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}${card(SCOUT_SPEC)}</div>
+        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}${card(SCOUT_SPEC)}${card(WARBOT_SPEC)}</div>
         <div class="muted small">Special weapon (Q)</div>
         <div class="tt-specials">${SPECIAL_IDS.map((id) => `<button class="tt-spec ${l.special === id ? 'sel' : ''}" data-special="${id}" title="${SPECIALS[id].blurb}">${SPECIALS[id].icon} ${SPECIALS[id].name}</button>`).join('')}</div>
         <div class="muted small tt-spec-blurb">${SPECIALS[l.special].blurb}</div>

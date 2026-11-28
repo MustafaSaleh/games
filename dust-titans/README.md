@@ -20,6 +20,7 @@ A kid-friendly tank & robot-suit battle game, built on the **Dust Rally** engine
 | **Tank** | Tracks, turret aims on its own | Heavy armour, big cannon, pushes enemies, rocks and wrecks aside | Slow to turn, can't jump |
 | **Mech** (an original walking robot suit, Mody in the cockpit) | Walks, runs, jump-jets, dash | Climbs anything, punch + arm cannon | Lighter armour |
 | **Scout** (bonus: Dust Rally cars with a mini turret) | Fast | Speed, grabs power-ups first | Fragile |
+| **Warbot** (heavy war walker, olive armour, shoulder plates "08") | Very slow | Toughest unit; gatling spins up the longer you hold fire, homing missile from the shoulder pod, **ground slam** knocks everything back | Slow to turn, can't jump |
 
 Each unit has a **spec** like Dust Rally cars (armour, speed, weight, turn rate, weapon slots) shown as bars in the Garage, plus liveries and decals.
 
@@ -72,6 +73,7 @@ Each phase ends with something playable and deployed.
 - [x] **6. Cities + more arenas:** 8 battlefields. **Cairo · Nile Bank** (the Nile winds through: wade or jump; palms, sailboats, market stalls; pyramids, a lotus tower, minarets and domes on the horizon), **Riyadh · Edge of the World** (a plateau with a ramp: robot suits jump up, tanks drive up; sky-bridge tower and gold-sphere tower), **Dubai · Marina Nights** (night, neon towers, beach and shallow sea, the super-tall stepped tower, the sail hotel, the palm island), plus Desert Bowl, Forest Clearing, Frozen Lake, Redwood Grove, Ghost Town. Landmarks stand outside the arena and shots that leave the arena vanish, so they're never damaged.
 - [x] **7. Polish (first pass):** coins from every battle, Garage upgrades (armour, reload, energy; 3 levels each), music per arena, night lighting, water splashes.
 - [x] **8. More to play:** the **Scout** (a Dust Rally buggy with a mini-gun, nitro), **special weapons** picked in the Garage (rocket swarm, laser beam, EMP pulse, shield bubble, **tomato cannon**), **practice battles** against computer players (Arena vs 3 bots, Alliance with 1 bot ally vs 2 bots; easy / tough), and **5 missions** with stars (Water truck escort in Ghost Town, Defend the market in Cairo, Alien beacon in Riyadh, Night of the Giant in Dubai, Supply run on the Frozen Lake).
+- [x] **9. Warbot:** a fourth unit — heavy armoured walker with a spin-up gatling, missile pod, blaster fist and a ground slam (works online and for practice bots).
 - [ ] **Next ideas:** split-screen co-op, bots in online rooms, more missions, a mission map / campaign, more bosses.
 
 ## Mech design: image prompt
@@ -112,6 +114,6 @@ Movement is screen-relative: push up and you go up the screen. The tank turns it
 
 | | |
 |---|---|
-| Keyboard + mouse | WASD / arrows move, mouse aims, click / F fires, Q / E special weapon, Space jump-jets (hold to hover), Shift dash (robot) / turbo ram (tank) / nitro (scout), C camera, M music, Esc pause |
+| Keyboard + mouse | WASD / arrows move, mouse aims, click / F fires, Q / E special weapon, Space jump-jets (hold to hover), Shift dash (robot) / turbo ram (tank) / nitro (scout) / ground slam (warbot), C camera, M music, Esc pause |
 | Gamepad | Left stick move, right stick aim, RT / RB fire, Y / X special, A jump, B / LB dash, Back camera |
 | Touch | Left thumb: move joystick. Right thumb: aim joystick (fires while pushed). JUMP / DASH (TURBO / NITRO) and SPECIAL buttons |

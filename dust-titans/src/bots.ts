@@ -14,8 +14,8 @@ export interface BotWorld {
 
 export const BOT_NAMES = ['Robo-Rex', 'Sparky', 'Captain Cog', 'Zippy', 'Bolt', 'Turbo Tia', 'Gizmo', 'Nova'];
 
-const RANGE = { tank: 26, mech: 18, scout: 14 };
-const SHOT_SPEED = { tank: 70, mech: 85, scout: 95 };
+const RANGE = { tank: 26, mech: 18, scout: 14, warbot: 16 };
+const SHOT_SPEED = { tank: 70, mech: 85, scout: 95, warbot: 95 };
 
 /**
  * A computer player for practice battles: picks the closest rival (or enemy robot), keeps a
@@ -137,8 +137,9 @@ export class Bot {
       const off = Math.abs(wrapAngle(i.aimYaw - u.turret));
       i.fire = d < 80 && off < 0.25;
       if (me.specialCd <= 0 && d < 38 && off < 0.3 && Math.random() < dt * (0.5 + this.skill)) i.special = true;
-      // tanks turbo-ram when lined up; scouts nitro to close in
-      if (u.kind !== 'mech' && u.energy > 0.6 && d > 40 && off < 0.4) i.dash = true;
+      // tanks turbo-ram when lined up; scouts nitro to close in; warbots slam when close
+      if (u.kind === 'warbot') i.dash = d < 8 && u.energy > 0.55;
+      else if (u.kind !== 'mech' && u.energy > 0.6 && d > 40 && off < 0.4) i.dash = true;
     }
 
     // ---- dodge: when hit, dash / jump ----
@@ -156,7 +157,7 @@ export class Bot {
     }
     if (this.dashT > 0) {
       this.dashT -= dt;
-      i.dash = u.energy > 0.35;
+      if (u.kind !== 'warbot') i.dash = u.energy > 0.35;
     }
     if (this.jumpT > 0) {
       this.jumpT -= dt;

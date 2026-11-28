@@ -32,6 +32,7 @@ import { BattleHud, SIDE_COLORS, Tags, TitansMenu, loadLoadout, type Loadout, ty
 import { MECH, Mech } from './units/mech';
 import { Tank } from './units/tank';
 import { Scout } from './units/scout';
+import { WARBOT, Warbot } from './units/warbot';
 import { NO_UNIT_INPUT, liveryById, type Livery, type Muzzle, type Unit, type UnitInput } from './units/unit';
 import { makeUnitView, type UnitView } from './units/views';
 import { bossLevel, waveSpawns } from './waves';
@@ -319,7 +320,7 @@ export class TitansGame {
 
   private makePlayer(id: string, name: string, l: Loadout, local: boolean, team: Team = 'player', slot = 0, side: Side = 'blue'): Player {
     const livery = liveryById(l.livery);
-    const unit: Unit = l.unit === 'mech' ? new Mech() : l.unit === 'scout' ? new Scout() : new Tank();
+    const unit: Unit = l.unit === 'mech' ? new Mech() : l.unit === 'scout' ? new Scout() : l.unit === 'warbot' ? new Warbot() : new Tank();
     const view = makeUnitView(l.unit, livery);
     const bubble = new THREE.Mesh(this.bubbleGeo, this.bubbleMat);
     bubble.visible = false;
@@ -735,6 +736,9 @@ export class TitansGame {
       p.unit.fired = true;
     } else if (t === 'beam' && p && !p.local) {
       p.beamT = Math.min(2, +(d as number) || 0);
+    } else if (t === 'slam' && p && !p.local) {
+      const e = d as { x: number; z: number };
+      this.slamAt(p, +e.x || 0, +e.z || 0, true);
     } else if (t === 'emp' && p && !p.local) {
       const e = d as { x: number; z: number };
       this.empAt(p, +e.x || 0, +e.z || 0);
@@ -879,10 +883,8 @@ export class TitansGame {
     u.airborne = q.airborne;
     u.dashing = q.dashing;
     const m = u as Mech;
-    if (u.kind === 'mech') {
-      m.stride = q.stride;
-      m.jets = q.jets;
-    }
+    if (u.kind === 'mech' || u.kind === 'warbot') m.stride = q.stride;
+    if (u.kind === 'mech') m.jets = q.jets;
     u.drive = clamp(Math.hypot(q.vx, q.vz) / u.spec.maxSpeed, 0, 1);
     p.shieldT = q.shield ? 1 : 0;
     const g = this.terrain.sample(u.x, u.z, this.gs);
@@ -1163,8 +1165,9 @@ export class TitansGame {
         this.cam.shake(u.impact * 0.05);
       }
       if (u.fired) this.fireWeapon(p);
+      if (u.kind === 'warbot' && (u as Warbot).missile) this.warbotMissile(p);
       this.specialStep(p, ui, dt);
-      if (u.kind === 'mech') this.mechFx(p, u as Mech);
+      if (u.kind === 'mech' || u.kind === 'warbot') this.mechFx(p, u as Mech);
       else this.trackMarks(u);
       if (u.landed > MECH.stompSpeed && u.alive) this.playerStomp(p);
       // loose rocks
@@ -1757,6 +1760,24 @@ export class TitansGame {
   }
 
   /** EMP: freeze and zap every robot around (x, z); rivals lose their energy */
+  /** Warbot ground slam: a shock ring that knocks back rival players (enemies are hit by the stomp) */
+  private slamAt(p: Player, x: number, z: number, remote: boolean): void {
+    const y = this.terrain.heightAt(x, z);
+    this.ring(x, y + 0.3, z, WARBOT.slamRadius, 0xffc46b, 32);
+    if (remote) this.stompFx(x, y, z, 1.4);
+    for (const q of this.players) {
+      if (q === p || q.team === p.team || !q.unit.alive) continue;
+      const u = q.unit;
+      const d = Math.hypot(u.x - x, u.z - z);
+      if (d > WARBOT.slamRadius + u.spec.radius) continue;
+      if (this.room && !q.local && !q.bot) continue;
+      this.hurtPlayer(q, 24, x, z, p.id);
+      if (q.shieldT > 0) continue;
+      u.vx += ((u.x - x) / (d || 1)) * 8 * Math.min(1, 2000 / u.spec.mass);
+      u.vz += ((u.z - z) / (d || 1)) * 8 * Math.min(1, 2000 / u.spec.mass);
+    }
+  }
+
   private empAt(p: Player, x: number, z: number): void {
     const y = this.terrain.heightAt(x, z);
     this.ring(x, y, z, EMP.radius, 0x7fd8ff, 45);
@@ -1798,18 +1819,24 @@ export class TitansGame {
   private playerStomp(p: Player): void {
     const u = p.unit;
     const power = clamp(u.landed / MECH.stompSpeed, 1, 1.7);
-    this.stompFx(u.x, u.y, u.z, power * 0.7);
+    const big = u.kind === 'warbot';
+    const reach = big ? WARBOT.slamRadius : 6;
+    this.stompFx(u.x, u.y, u.z, power * (big ? 1 : 0.7));
+    if (big) {
+      this.slamAt(p, u.x, u.z, false);
+      this.room?.send('slam', { x: Math.round(u.x * 10) / 10, z: Math.round(u.z * 10) / 10 });
+    }
     for (const e of this.enemies) {
       if (!e.alive || e.kind === 'drone') continue;
       const tg: Target[] = [];
       e.targets(tg);
-      const t = tg.find((x) => !x.armor && Math.hypot(x.x - u.x, x.z - u.z) < 6 + x.r);
+      const t = tg.find((x) => !x.armor && Math.hypot(x.x - u.x, x.z - u.z) < reach + x.r);
       if (!t) continue;
-      this.dealDamage(e, t, 22 * power, p);
+      this.dealDamage(e, t, (big ? 30 : 22) * power, p);
       const d = Math.hypot(e.x - u.x, e.z - u.z) || 1;
       if (e.kind !== 'boss') {
-        e.vx += ((e.x - u.x) / d) * 12;
-        e.vz += ((e.z - u.z) / d) * 12;
+        e.vx += ((e.x - u.x) / d) * (big ? 18 : 12);
+        e.vz += ((e.z - u.z) / d) * (big ? 18 : 12);
       }
     }
   }
@@ -1829,7 +1856,7 @@ export class TitansGame {
     this.cam.shake(clamp((1.1 * size) / Math.max(1, d / 12), 0, 1.2));
   }
 
-  private mechFx(p: Player, u: Mech): void {
+  private mechFx(p: Player, u: Unit & { stride: number; jets?: boolean }): void {
     if (u.jets && this.steps % 2 === 0) {
       const s = Math.sin(u.turret),
         c = Math.cos(u.turret);
@@ -1839,14 +1866,32 @@ export class TitansGame {
         this.particles.emit(bx, u.y + 3, bz, 0, -6, 0, [1, 0.7, 0.3], 1.1, 0.25, 1);
       }
     }
-    if (u.dashing && this.steps % 2 === 0) this.puff(u.x, u.y + 0.5, u.z, 2, [0.9, 0.85, 0.75], 1.4);
+    const big = u.kind === 'warbot';
+    if (u.dashing && !big && this.steps % 2 === 0) this.puff(u.x, u.y + 0.5, u.z, 2, [0.9, 0.85, 0.75], 1.4);
     if (u.landed > 2) this.puff(u.x, u.y + 0.3, u.z, 8, [0.85, 0.78, 0.65], 1.6);
-    // footsteps
-    const step = Math.floor(u.stride / 1.6);
+    // footsteps (the Warbot's thump and shake the camera a little)
+    const step = Math.floor(u.stride / (big ? 2.2 : 1.6));
     if (p.local && !u.airborne && step !== (u as unknown as { _st?: number })._st) {
       (u as unknown as { _st?: number })._st = step;
-      this.audio.landing(1.2);
+      this.audio.landing(big ? 2.4 : 1.2);
+      if (big && u.speed > 2) this.cam.shake(0.08);
     }
+  }
+
+  /** Warbot: a homing missile from the shoulder pod */
+  private warbotMissile(p: Player): void {
+    const u = p.unit;
+    u.muzzle(this.muzzle);
+    const m = this.muzzle;
+    const hs = Math.hypot(m.vx, m.vz) || 1;
+    m.vx = (m.vx / hs) * 34;
+    m.vz = (m.vz / hs) * 34;
+    m.vy = 4;
+    m.y += 0.8;
+    this.shots.fire(p.team, 'rocket', m.x, m.y, m.z, m.vx, m.vy, m.vz, p.id);
+    this.room?.send('shot', encodeShot('rocket', m));
+    this.puff(m.x, m.y, m.z, 3, [0.9, 0.85, 0.8], 1);
+    if (p.local) this.audio.whoosh();
   }
 
   /** fireball + smoke + sparks + light + sound */
@@ -1959,7 +2004,7 @@ export class TitansGame {
     const bossNear = this.boss && Math.hypot(this.boss.x - x, this.boss.z - z) < 60 ? 0.25 : 0;
     this.cam.zoomTarget = this.state === 'menu' ? 0.9 : (isTouchDevice() ? 1.0 : 1.3) + bossNear;
     this.cam.chaseScale = t.spec.chase;
-    const ch = t.kind === 'mech' ? (chase ? lerpAngle(t.pTurret, t.turret, alpha) : h) : h;
+    const ch = t.kind === 'mech' || t.kind === 'warbot' ? (chase ? lerpAngle(t.pTurret, t.turret, alpha) : h) : h;
     this.cam.update(Math.min(dt, 0.05), x, y, z, t.vx, t.vz, ch, false);
     this.terrain.update(x + t.vx, z + t.vz, this.r3.quality.genBudgetMs);
     this.props.update(this.terrain, this.cam.camera);
@@ -2021,7 +2066,7 @@ export class TitansGame {
       this.hud.set('powers', pw.join('  '));
       const b = this.boss;
       if (b) this.hud.bar('bossHp', b.hpFrac);
-      const rpm = t.kind === 'mech' ? 700 + t.drive * 1300 + (t.dashing ? 1500 : 0) : t.kind === 'scout' ? 1400 + Math.abs(t.drive) * 5200 + (t.dashing ? 1500 : 0) : 900 + Math.abs(t.drive) * 3200 + (this.input.unit.move > 0.1 ? 600 : 0) + (t.dashing ? 1200 : 0);
+      const rpm = t.kind === 'warbot' ? 450 + t.drive * 800 + (t as Warbot).spin * 900 : t.kind === 'mech' ? 700 + t.drive * 1300 + (t.dashing ? 1500 : 0) : t.kind === 'scout' ? 1400 + Math.abs(t.drive) * 5200 + (t.dashing ? 1500 : 0) : 900 + Math.abs(t.drive) * 3200 + (this.input.unit.move > 0.1 ? 600 : 0) + (t.dashing ? 1200 : 0);
       this.audio.update(me.unit.alive ? rpm : 0, me.unit.speed, this.input.unit.move, 0, me.unit.airborne, 0, t.kind === 'tank' ? 0.3 : 0.1);
     }
 

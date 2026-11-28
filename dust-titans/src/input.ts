@@ -245,10 +245,10 @@ export class TouchSticks {
     root.append(this.btn.jump, this.btn.dash, this.btn.special);
   }
 
-  /** tank: TURBO only · mech: JUMP + DASH */
+  /** tank: TURBO · scout: NITRO · warbot: SLAM · mech: JUMP + DASH */
   setUnit(kind: UnitKind): void {
     this.btn.jump.style.display = kind === 'mech' ? '' : 'none';
-    this.btn.dash.textContent = kind === 'mech' ? 'DASH' : kind === 'scout' ? 'NITRO' : 'TURBO';
+    this.btn.dash.textContent = kind === 'mech' ? 'DASH' : kind === 'scout' ? 'NITRO' : kind === 'warbot' ? 'SLAM' : 'TURBO';
   }
 
   /** special button: its icon, and how charged it is (0..1) */
