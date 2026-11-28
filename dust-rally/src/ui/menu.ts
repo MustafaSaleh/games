@@ -29,6 +29,7 @@ export interface MenuHandlers {
   hostStart(): void;
   toLobby(): void;
   emote(i: number): void;
+  watch(): void;
 }
 
 /** one row of the multiplayer results table */
@@ -72,6 +73,8 @@ export interface ResultInfo {
   online?: boolean;
   /** online guest: the host decides what happens next */
   waiting?: boolean;
+  /** online, finished while others still race: offer to watch them */
+  canWatch?: boolean;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -521,6 +524,7 @@ export class Menu {
         ${r.lines.map((l) => `<div class="result-line">${esc(l)}</div>`).join('')}
         <ol class="standings">${rows}</ol>
         ${r.online ? this.emoteRow() : ''}
+        ${r.canWatch ? '<div class="btn-col"><button class="btn" data-act="watch">👀 Watch the others race</button></div>' : ''}
         <div class="btn-col">
           ${
             r.waiting
@@ -594,6 +598,9 @@ export class Menu {
         break;
       case 'emote':
         this.h.emote(Number(t.dataset.i));
+        break;
+      case 'watch':
+        this.h.watch();
         break;
       case 'pick-stage':
         this.h.hostStage(t.dataset.id!);

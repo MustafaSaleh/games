@@ -1467,3 +1467,32 @@ input:not([type]) {
   opacity: 0.75;
   text-align: right;
 }
+
+/* watching other players after finishing (online) */
+.spec-bar {
+  display: none;
+}
+.hud.spectating .spec-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: absolute;
+  left: 50%;
+  bottom: calc(20px + var(--sab));
+  transform: translateX(-50%);
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  pointer-events: auto;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.hud.spectating .spec-bar span {
+  min-width: 150px;
+  text-align: center;
+}
+.hud.spectating .hud-speed,
+.hud.spectating .hud-ammo,
+.hud.spectating .hud-top-center {
+  display: none;
+}

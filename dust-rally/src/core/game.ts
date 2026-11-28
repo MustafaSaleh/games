@@ -97,6 +97,11 @@ export class Game {
   private p1Finish: number | null = null;
   private mpDeadline = 0;
   private mpShown = false;
+  /** online: ids in the order they crossed the finish line */
+  private finishOrder: string[] = [];
+  /** online, after finishing: watching another player's car (their id), or null */
+  private spectating: string | null = null;
+  private specDone = 0;
   private rbuf = [0, 0, 0, 0, 0, 0];
   private sparks = new Sparks();
   /** small / medium rocks that cars knock around */
@@ -117,7 +122,7 @@ export class Game {
   private tomatoHits: TomatoHit[] = [];
   private tomatoTargets: TomatoTarget[] = [];
   private splatLayer: HTMLElement;
-  private toast = { text: '', until: 0 };
+  private toast = { text: '', until: 0, important: false };
   private contact: CarContact = makeContact();
   private remoteBody: CarBody = { x: 0, y: 0, z: 0, vx: 0, vz: 0, heading: 0, yawRate: 0 };
   private dots: MapDot[] = [];
@@ -184,12 +189,14 @@ export class Game {
       hostStart: () => this.session?.start(),
       toLobby: () => this.toLobby(),
       emote: (i) => this.sendEmote(i),
+      watch: () => this.startSpectate(),
     });
     this.hud.onPause = () => this.pause();
     this.hud.onReset = () => this.resetCar();
     this.hud.onCamera = () => this.toggleCamera();
     this.hud.onMusic = () => this.toggleMusic();
     this.hud.onEmote = (i) => this.sendEmote(i);
+    this.hud.onSpectate = (d) => (d === 0 ? this.endSpectate(true) : this.cycleSpectate(d));
     this.hud.show(false);
     this.touch.show(false);
 
@@ -430,6 +437,8 @@ export class Game {
     this.race = new Race(mode, gates, tr, this.mp === 'off' ? (this.best?.splits ?? null) : null, startIdx);
     if (this.p2) this.p2.race = new Race(mode, gates, tr, null, startIdx);
     this.p1Finish = null;
+    this.finishOrder.length = 0;
+    this.endSpectate(false);
     this.mpDeadline = 0;
     this.mpShown = false;
     this.poseAcc = 0;
@@ -613,9 +622,11 @@ export class Game {
     this.say(this.p2 ? `P${who} got a 🍅! (${key} to throw)` : `🍅 +1! Throw it back at your chaser (${isTouchDevice() ? 'tap 🍅' : 'F'})`);
   }
 
-  private say(text: string, ms = 2200): void {
+  /** a short HUD message; `important` ones (winner announcements) win over route warnings */
+  private say(text: string, ms = 2200, important = false): void {
     this.toast.text = text;
     this.toast.until = performance.now() + ms;
+    this.toast.important = important;
   }
 
   private throwTomato(who: 1 | 2): void {
@@ -797,6 +808,7 @@ export class Game {
     this.p1Finish = t;
     buzz(40);
     if (this.mp === 'online') {
+      if (this.session) this.finishOrder.push(this.session.myId);
       this.session?.sendFinish(t);
       this.input.enabled = false;
       this.showMpResults(1400);
@@ -826,6 +838,76 @@ export class Game {
       this.fillMpResult();
       this.menu.show('results');
     }, delay);
+  }
+
+  /* ---- watching the others after you finish (online) ---- */
+
+  private racingRemotes(): RemoteCar[] {
+    return [...this.remotes.values()].filter((r) => !r.gone && r.finishTime == null);
+  }
+
+  private startSpectate(): void {
+    const first = this.racingRemotes()[0];
+    if (!first) return;
+    this.spectating = first.player.id;
+    this.specDone = 0;
+    this.menu.hide();
+    this.hud.show(true);
+    this.hud.root.classList.add('spectating');
+    this.labelLayer.style.display = '';
+    this.audio.setActive(false);
+  }
+
+  private cycleSpectate(dir: number): void {
+    const list = this.racingRemotes();
+    if (!list.length) return;
+    const i = list.findIndex((r) => r.player.id === this.spectating);
+    this.spectating = list[(i + dir + list.length) % list.length].player.id;
+  }
+
+  /** stop watching; optionally go back to the results screen */
+  private endSpectate(showResults: boolean): void {
+    if (!this.spectating) return;
+    this.spectating = null;
+    this.hud.root.classList.remove('spectating');
+    if (!showResults) return;
+    this.hud.show(false);
+    this.labelLayer.style.display = 'none';
+    this.fillMpResult();
+    this.menu.show('results');
+  }
+
+  /** the car the camera follows while spectating (switches when that player finishes) */
+  private spectateTarget(): RemoteCar | null {
+    if (!this.spectating) return null;
+    const now = performance.now();
+    const racing = this.racingRemotes();
+    let r = this.remotes.get(this.spectating);
+    if (!r || r.gone) {
+      r = racing[0];
+      if (!r) {
+        this.endSpectate(true);
+        return null;
+      }
+      this.spectating = r.player.id;
+      this.specDone = 0;
+    } else if (r.finishTime != null) {
+      // the watched player finished: stay on them for a moment, then the next one still racing
+      if (!this.specDone) this.specDone = now + 2500;
+      if (now > this.specDone) {
+        const next = racing[0];
+        if (!next) {
+          this.endSpectate(true); // everyone is done: results
+          return null;
+        }
+        this.spectating = next.player.id;
+        this.specDone = 0;
+        r = next;
+      }
+    }
+    const place = this.finishOrder.indexOf(r.player.id) + 1;
+    this.hud.set('specName', `👀 ${r.player.name} · ${place ? 'finished ' + ordinal(place) : 'racing…'}`);
+    return r.visible ? r : null;
   }
 
   /** (re)build the multiplayer standings shown on the results screen */
@@ -863,6 +945,7 @@ export class Game {
       standings: rows,
       online: this.mp === 'online',
       waiting: !host,
+      canWatch: this.mp === 'online' && this.p1Finish != null && [...this.remotes.values()].some((r) => !r.gone && r.finishTime == null),
     };
     if (this.session?.isHost && rows.every((r) => r.time != null || r.status === 'left')) this.session.endRace();
   }
@@ -928,6 +1011,11 @@ export class Game {
       const r = this.remotes.get(id);
       if (!r || r.finishTime != null) return;
       r.finishTime = t;
+      this.finishOrder.push(id);
+      const place = this.finishOrder.length;
+      // everyone still racing (or watching) hears about it
+      if (!this.menu.visible)
+        this.say(place === 1 ? `🏆 ${r.player.name} won the race! (${fmtTime(t)})` : `🏁 ${r.player.name} finished ${ordinal(place)}`, place === 1 ? 3500 : 2200, true);
       this.refreshMpResults();
     };
     s.ev.left = (id) => {
@@ -1343,13 +1431,21 @@ export class Game {
     }
     this.ghostModel.root.visible = this.ghostVisible;
 
+    // what the camera follows: my car, or (after finishing online) another player's
+    const spec = this.spectateTarget();
+    const vx = spec ? spec.x : ix,
+      vy = spec ? spec.model.root.position.y : iy,
+      vz = spec ? spec.z : iz,
+      vh = spec ? spec.heading : ih,
+      vvx = spec ? spec.vx : car.vx,
+      vvz = spec ? spec.vz : car.vz;
     // world streaming (split-screen: around both cars)
-    world.update(car.x, car.z, Math.max(race.progress.idx, p2 ? p2.race.progress.idx : 0, world.track.start));
+    world.update(vx, vz, Math.max(race.progress.idx, p2 ? p2.race.progress.idx : 0, world.track.start));
     // chase camera looks toward the horizon: stream terrain further ahead of the car
     const chase = settings.cameraView === 'chase' && !this.attract;
     const ahead = chase ? this.r3.quality.viewRadius * 0.38 : 0;
-    const fx = car.x + car.vx * 1.2 + Math.sin(car.heading) * ahead,
-      fz = car.z + car.vz * 1.2 + Math.cos(car.heading) * ahead;
+    const fx = vx + vvx * 1.2 + Math.sin(vh) * ahead,
+      fz = vz + vvz * 1.2 + Math.cos(vh) * ahead;
     const tg = performance.now();
     terrain.extra.length = 0;
     if (p2) terrain.extra.push([p2.car.x + p2.car.vx * 1.2 + Math.sin(p2.car.heading) * ahead, p2.car.z + p2.car.vz * 1.2 + Math.cos(p2.car.heading) * ahead]);
@@ -1363,7 +1459,7 @@ export class Game {
     const ground = this.groundFn;
     this.cam.mode = chase ? 'chase' : 'top';
     this.cam.ground = ground;
-    this.cam.update(Math.min(dt, 0.05), ix, iy, iz, car.vx, car.vz, ih, settings.cameraRotate);
+    this.cam.update(Math.min(dt, 0.05), vx, vy, vz, vvx, vvz, vh, settings.cameraRotate);
     if (p2) {
       p2.cam.mode = this.cam.mode;
       p2.cam.ground = ground;
@@ -1562,7 +1658,8 @@ export class Game {
     else if (race.missedWarn > 0) msg = 'MISSED CHECKPOINT — GO BACK';
     else if (race.wrongWay) msg = 'WRONG WAY';
     else if (race.offTrackFar) msg = 'OFF ROUTE — press ↺';
-    if (!msg && this.toast.until > performance.now()) msg = this.toast.text;
+    if (this.spectating) msg = ''; // watching someone else: only announcements
+    if ((!msg || this.toast.important) && this.toast.until > performance.now()) msg = this.toast.text;
     hud.set('msg', msg);
     if (settings.showFps) hud.set('fps', `${this.r3.fps.toFixed(0)} fps · dpr ${this.r3.dpr} · ${this.props.instances} props`);
     const next = race.nextGate();
