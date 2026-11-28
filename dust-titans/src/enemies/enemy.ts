@@ -45,6 +45,8 @@ export interface Enemy {
   readonly alive: boolean;
   /** points for destroying it */
   readonly score: number;
+  /** frozen by an EMP / stuck in tomato juice (s) */
+  stunT?: number;
   update(dt: number, ctx: EnemyCtx): void;
   sync(dt: number, time: number, ctx: EnemyCtx): void;
   /** hit spheres for projectiles (weak points first) */

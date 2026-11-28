@@ -1,6 +1,6 @@
 import { cleanName, makeCode } from '@engine/net/session';
 import type { HostTransport, Link, NetDriver } from '@engine/net/transport';
-import type { UnitKind } from '../units/unit';
+import { unitKind, type UnitKind } from '../units/unit';
 
 /**
  * Online rooms for Dust Titans (same star topology as Dust Rally: guests talk only to the
@@ -159,7 +159,7 @@ export class Room {
         let slot = 0;
         while (used.has(slot)) slot++;
         const blues = this.players.filter((p) => p.side === 'blue').length;
-        this.players.push({ id: link.id, name: cleanName(m.name), unit: m.unit === 'mech' ? 'mech' : 'tank', livery: String(m.livery), slot, side: blues > this.players.length - blues ? 'red' : 'blue' });
+        this.players.push({ id: link.id, name: cleanName(m.name), unit: unitKind(m.unit), livery: String(m.livery), slot, side: blues > this.players.length - blues ? 'red' : 'blue' });
         link.send({ k: 'welcome', id: link.id } satisfies Msg);
         this.broadcastLobby();
         return;
@@ -167,7 +167,7 @@ export class Room {
       if (m.k === 'loadout') {
         const p = this.players.find((x) => x.id === link.id);
         if (p) {
-          p.unit = m.unit === 'mech' ? 'mech' : 'tank';
+          p.unit = unitKind(m.unit);
           p.livery = String(m.livery);
           this.broadcastLobby();
         }

@@ -5,7 +5,7 @@ import type { Mech } from '../units/mech';
 import type { Unit } from '../units/unit';
 
 /** compact codes for the wire */
-export const SHOT_CODES: ShotKind[] = ['shell', 'bolt', 'orb', 'laser', 'plasma'];
+export const SHOT_CODES: ShotKind[] = ['shell', 'bolt', 'orb', 'laser', 'plasma', 'pellet', 'rocket', 'tomato'];
 export const ENEMY_CODES: EnemyKind[] = ['drone', 'walker', 'alien', 'boss'];
 
 const r2 = (v: number) => Math.round(v * 100) / 100;

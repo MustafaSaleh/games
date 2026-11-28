@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, lerpAngle } from '@engine/core/math';
 import type { Mech } from './mech';
+import type { Scout } from './scout';
+import { buildCar, disposeCar, type CarModel } from '@engine/render/models';
 import { buildTank, type TankModel } from './tankModel';
 import type { Livery, Unit, UnitKind } from './unit';
 
@@ -231,6 +233,58 @@ export class MechView implements UnitView {
   }
 }
 
+/** Scout: a Dust Rally buggy in your colours with a mini-gun turret on the roll cage. */
+export class ScoutView implements UnitView {
+  readonly root: THREE.Group;
+  private car: CarModel;
+  private turret = new THREE.Group();
+  private gun = new THREE.Group();
+  private geos: THREE.BufferGeometry[] = [];
+  private mats: THREE.Material[] = [];
+  private spin = 0;
+
+  constructor(l: Livery) {
+    this.car = buildCar('buggy', { id: l.id, name: l.name, body: l.body, stripe: l.stripe, roof: l.dark });
+    this.root = this.car.root;
+    const mat = new THREE.MeshLambertMaterial({ color: l.dark, flatShading: true });
+    const acc = new THREE.MeshLambertMaterial({ color: l.stripe, flatShading: true });
+    this.mats.push(mat, acc);
+    const g = (geo: THREE.BufferGeometry, m: THREE.Material) => {
+      this.geos.push(geo);
+      return new THREE.Mesh(geo, m);
+    };
+    this.turret.position.set(0, 1.55, -0.2);
+    this.turret.add(g(new THREE.CylinderGeometry(0.42, 0.5, 0.35, 8), mat), g(new THREE.BoxGeometry(0.5, 0.3, 0.5).translate(0, 0.3, 0), acc));
+    this.gun.position.set(0, 0.3, 0.2);
+    for (const x of [-0.12, 0.12]) this.gun.add(g(new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6).rotateX(Math.PI / 2).translate(x, 0, 0.6), mat));
+    this.turret.add(this.gun);
+    this.car.body.add(this.turret);
+  }
+
+  update(u: Unit, alpha: number, dt: number): void {
+    const h = lerpAngle(u.pHeading, u.heading, alpha);
+    pose(this.root, lerp(u.px, u.x, alpha), lerp(u.py, u.y, alpha), lerp(u.pz, u.z, alpha), h, u);
+    const s = u as Scout;
+    const w = this.car.wheels;
+    for (let i = 0; i < w.length; i++) {
+      w[i].rotation.x += (u.drive * 24 * dt) / Math.max(0.2, this.car.wheelRadius);
+      if (i < 2) w[i].rotation.y = -(s.steerAngle ?? 0) * 0.5;
+    }
+    // body roll in turns
+    this.car.body.rotation.z += (clamp(-u.yawRate * u.drive * 0.12, -0.12, 0.12) - this.car.body.rotation.z) * Math.min(1, dt * 8);
+    this.turret.rotation.y = lerpAngle(u.pTurret, u.turret, alpha) - h;
+    if (u.fired) this.spin += 1.2;
+    this.gun.rotation.z = this.spin;
+  }
+
+  dispose(): void {
+    disposeCar(this.car);
+    this.root.removeFromParent();
+    for (const g of this.geos) g.dispose();
+    for (const m of this.mats) m.dispose();
+  }
+}
+
 export function makeUnitView(kind: UnitKind, l: Livery): UnitView {
-  return kind === 'mech' ? new MechView(l) : new TankView(l);
+  return kind === 'mech' ? new MechView(l) : kind === 'scout' ? new ScoutView(l) : new TankView(l);
 }

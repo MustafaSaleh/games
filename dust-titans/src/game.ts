@@ -30,10 +30,12 @@ import { EMOTES, Room, type Mode, type RoomPlayer, type Side } from './net/room'
 import { decodeEnemies, decodePose, decodeShots, encodeEnemy, encodePose, encodeShot, type PoseState } from './net/sync';
 import { BattleHud, SIDE_COLORS, Tags, TitansMenu, loadLoadout, type Loadout, type ResultRow } from './ui';
 import { MECH, Mech } from './units/mech';
-import { TANK, Tank } from './units/tank';
+import { Tank } from './units/tank';
+import { Scout } from './units/scout';
 import { NO_UNIT_INPUT, liveryById, type Livery, type Muzzle, type Unit, type UnitInput } from './units/unit';
 import { makeUnitView, type UnitView } from './units/views';
 import { bossLevel, waveSpawns } from './waves';
+import { BEAM, EMP, SHIELD_TIME, SPECIALS, TOMATO_STUN, rayHit, type SpecialId } from './specials';
 
 type State = 'menu' | 'playing' | 'paused' | 'over';
 
@@ -56,6 +58,16 @@ export interface Player {
   slot: number;
   side: Side;
   respawnT: number;
+  special: SpecialId;
+  specialCd: number;
+  specialPrev: boolean;
+  rocketsLeft: number;
+  rocketT: number;
+  /** laser beam time left, its mesh, damage waiting to be reported (online guest) */
+  beamT: number;
+  beam: THREE.Mesh | null;
+  beamAcc: Map<string, { e: Enemy; t: string; dmg: number }>;
+  beamSend: number;
   /** player-facing data the enemies see */
   ref: PlayerRef;
 }
@@ -69,7 +81,6 @@ interface RemotePose {
 const MATCH_TIME: Record<Mode, number> = { coop: 0, arena: 180, alliance: 240 };
 const KO_LIMIT = 10;
 
-const RELOAD = { tank: TANK.reload, mech: MECH.reload };
 
 export class TitansGame {
   readonly r3: Renderer3D;
@@ -184,6 +195,10 @@ export class TitansGame {
     this.hud.onCamera = () => updateSettings({ cameraView: settings.cameraView === 'chase' ? 'top' : 'chase' });
     this.hud.onMusic = () => updateSettings({ music: !settings.music });
     this.hud.onEmote = (i) => this.emote(i);
+    this.hud.onSpecial = () => {
+      const me = this.local;
+      if (me && me.specialCd <= 0 && me.unit.alive && this.state === 'playing') this.useSpecial(me);
+    };
     onSettingsChange(() => this.applySettings());
     const unlock = () => this.unlockAudio();
     window.addEventListener('pointerdown', unlock, { capture: true });
@@ -217,7 +232,7 @@ export class TitansGame {
       (a, dt) => this.render(a, dt),
       () => {
         const u = this.local?.unit;
-        this.input.update(this.cam.camera, this.cam.mode === 'chase' ? this.cam.yaw : 0, u ? { x: u.x, y: u.y + (u.kind === 'mech' ? 2.6 : 0), z: u.z } : { x: 0, y: 0, z: 0 });
+        this.input.update(this.cam.camera, this.cam.mode === 'chase' ? this.cam.yaw : 0, u ? { x: u.x, y: u.y + u.spec.aimHeight, z: u.z } : { x: 0, y: 0, z: 0 });
       },
     );
     this.loadArena();
@@ -246,17 +261,21 @@ export class TitansGame {
 
   private makePlayer(id: string, name: string, l: Loadout, local: boolean, team: Team = 'player', slot = 0, side: Side = 'blue'): Player {
     const livery = liveryById(l.livery);
-    const unit: Unit = l.unit === 'mech' ? new Mech() : new Tank();
+    const unit: Unit = l.unit === 'mech' ? new Mech() : l.unit === 'scout' ? new Scout() : new Tank();
     const view = makeUnitView(l.unit, livery);
     const bubble = new THREE.Mesh(this.bubbleGeo, this.bubbleMat);
     bubble.visible = false;
     this.r3.scene.add(view.root, bubble);
-    const p: Player = { id, name, team, local, unit, view, livery, bubble, shieldT: 0, rapidT: 0, tripleT: 0, score: 0, ko: 0, slot, side, respawnT: 0, ref: { x: 0, y: 0, z: 0, vx: 0, vz: 0, r: unit.spec.radius, alive: false, airborne: false } };
+    const p: Player = { id, name, team, local, unit, view, livery, bubble, shieldT: 0, rapidT: 0, tripleT: 0, score: 0, ko: 0, slot, side, respawnT: 0, special: l.special, specialCd: 0, specialPrev: false, rocketsLeft: 0, rocketT: 0, beamT: 0, beam: null, beamAcc: new Map(), beamSend: 0, ref: { x: 0, y: 0, z: 0, vx: 0, vz: 0, r: unit.spec.radius, alive: false, airborne: false } };
     unit.reset(0, -20, 0, this.ground);
     return p;
   }
 
   private removePlayer(p: Player): void {
+    if (p.beam) {
+      p.beam.removeFromParent();
+      p.beam.geometry.dispose();
+    }
     p.view.dispose();
     p.bubble.removeFromParent();
     this.players = this.players.filter((x) => x !== p);
@@ -324,6 +343,7 @@ export class TitansGame {
       p.unit.reset(sp.x, sp.z, sp.h, this.ground);
       p.shieldT = p.rapidT = p.tripleT = 0;
       p.score = p.ko = p.respawnT = 0;
+      p.specialCd = p.rocketsLeft = p.beamT = 0;
     }
     this.matchT = this.room ? MATCH_TIME[this.mode] : 0;
     this.overSent = false;
@@ -612,7 +632,7 @@ export class TitansGame {
     const teamOf = (rp: RoomPlayer): Team => (mode === 'coop' ? 'player' : mode === 'arena' ? 'p-' + rp.id : rp.side);
     for (const rp of players) {
       const local = rp.id === room.myId;
-      const l: Loadout = local ? this.loadout : { unit: rp.unit, livery: rp.livery };
+      const l: Loadout = local ? this.loadout : { unit: rp.unit, livery: rp.livery, special: 'rockets' };
       const p = this.makePlayer(rp.id, rp.name, l, local, teamOf(rp), rp.slot, rp.side);
       if (local) this.players.unshift(p);
       else this.players.push(p);
@@ -647,6 +667,11 @@ export class TitansGame {
         this.sparks.emit(sh.x, sh.y, sh.z, sh.kind === 'shell' ? 8 : 3, sh.kind === 'shell' ? 6 : 3);
       }
       p.unit.fired = true;
+    } else if (t === 'beam' && p && !p.local) {
+      p.beamT = Math.min(2, +(d as number) || 0);
+    } else if (t === 'emp' && p && !p.local) {
+      const e = d as { x: number; z: number };
+      this.empAt(p, +e.x || 0, +e.z || 0);
     } else if (t === 'eshot') {
       for (const sh of decodeShots(d)) this.shots.fire('enemy', sh.kind, sh.x, sh.y, sh.z, sh.vx, sh.vy, sh.vz);
     } else if (t === 'enemies') this.applyEnemies(d);
@@ -792,12 +817,13 @@ export class TitansGame {
       m.stride = q.stride;
       m.jets = q.jets;
     }
-    u.drive = clamp(Math.hypot(q.vx, q.vz) / (u.kind === 'mech' ? MECH.maxSpeed : TANK.maxSpeed), 0, 1);
+    u.drive = clamp(Math.hypot(q.vx, q.vz) / u.spec.maxSpeed, 0, 1);
     p.shieldT = q.shield ? 1 : 0;
     const g = this.terrain.sample(u.x, u.z, this.gs);
-    u.upX += (g.nx * (u.kind === 'mech' ? 0.35 : 1) - u.upX) * k;
-    u.upY += ((u.kind === 'mech' ? 1 : g.ny) - u.upY) * k;
-    u.upZ += (g.nz * (u.kind === 'mech' ? 0.35 : 1) - u.upZ) * k;
+    const up = u.spec.upright;
+    u.upX += (g.nx * up - u.upX) * k;
+    u.upY += ((up < 1 ? 1 : g.ny) - u.upY) * k;
+    u.upZ += (g.nz * up - u.upZ) * k;
   }
   private gs = makeGroundSample();
 
@@ -964,6 +990,7 @@ export class TitansGame {
         this.cam.shake(u.impact * 0.05);
       }
       if (u.fired) this.fireWeapon(p);
+      this.specialStep(p, ui, dt);
       if (u.kind === 'mech') this.mechFx(p, u as Mech);
       else this.trackMarks(u);
       if (u.landed > MECH.stompSpeed && u.alive) this.playerStomp(p);
@@ -996,6 +1023,11 @@ export class TitansGame {
     // ---- enemies ----
     this.ctx.players = this.players.map((p) => p.ref);
     for (const e of this.enemies) {
+      if (e.stunT && e.stunT > 0) {
+        e.stunT -= dt;
+        if (this.steps % 8 === 0) this.sparks.emit(e.x, e.y + (e.kind === 'walker' ? 2.5 : e.kind === 'boss' ? 9 : 1), e.z, 4, 3);
+        continue;
+      }
       e.update(dt, this.ctx);
       if (e.kind !== 'boss') this.world.clamp(e, e.kind === 'drone' ? -10 : 4);
       else this.world.clamp(e, 12);
@@ -1007,9 +1039,11 @@ export class TitansGame {
     tg.length = 0;
     for (const p of this.players) {
       const u = p.unit;
-      tg.push({ id: p.id, team: p.team, x: u.x, y: u.y + u.spec.hitHeight, z: u.z, r: u.kind === 'mech' ? 1.7 : TANK.radius * 0.9, alive: u.alive && playing, owner: p });
+      tg.push({ id: p.id, team: p.team, x: u.x, y: u.y + u.spec.hitHeight, z: u.z, r: u.spec.hitR, alive: u.alive && playing, owner: p });
     }
     for (const e of this.enemies) e.targets(tg);
+    for (const p of this.players) if (p.beamT > 0) this.beamStep(p, dt);
+    this.updateRings(dt);
     this.shots.step(dt, ground, tg, this.impacts);
     for (const hit of this.impacts) this.onImpact(hit);
     this.debris.step(dt, ground);
@@ -1174,6 +1208,7 @@ export class TitansGame {
 
   private onImpact(hit: Impact): void {
     const cfg = SHOTS[hit.kind];
+    if (hit.kind === 'tomato') this.tomatoSplat(hit);
     const fromPlayer = hit.team !== 'enemy';
     const shooter = this.players.find((p) => p.id === hit.by);
     if (fromPlayer) {
@@ -1292,7 +1327,7 @@ export class TitansGame {
     }
   }
 
-  hurtPlayer(p: Player | undefined, dmg: number, fromX: number, fromZ: number, by?: string): void {
+  hurtPlayer(p: Player | undefined, dmg: number, fromX: number, fromZ: number, by?: string, soft = false): void {
     if (!p || !p.unit.alive || this.state !== 'playing') return;
     if (this.room && !p.local) return; // every device decides for its own unit
     const u = p.unit;
@@ -1308,7 +1343,7 @@ export class TitansGame {
     const kick = Math.min(6, (dmg * 120) / u.spec.mass);
     u.vx += (dx / l) * kick;
     u.vz += (dz / l) * kick;
-    if (p.local) {
+    if (p.local && !soft) {
       this.hud.hurt();
       this.cam.shake(0.5);
       this.audio.impact(10);
@@ -1346,7 +1381,7 @@ export class TitansGame {
         const nx = dx / d,
           nz = dz / d;
         const pen = min - d;
-        const unitShare = e.kind === 'boss' ? 1 : u.kind === 'tank' ? 0.15 : 0.5;
+        const unitShare = e.kind === 'boss' ? 1 : u.spec.push;
         u.x += nx * pen * unitShare;
         u.z += nz * pen * unitShare;
         e.x -= nx * pen * (1 - unitShare);
@@ -1388,6 +1423,189 @@ export class TitansGame {
       const a = Math.random() * Math.PI * 2;
       this.particles.emit(u.x + Math.cos(a) * 2, w + 0.2, u.z + Math.sin(a) * 2, Math.cos(a) * 2, 2 + Math.random() * 3, Math.sin(a) * 2, [0.75, 0.88, 0.95], 1 + Math.random(), 0.6, 0.8);
     }
+  }
+
+
+  /* ------------------------------------------------------------------ */
+  /* special weapons                                                      */
+  /* ------------------------------------------------------------------ */
+
+  /** cooldown, the press, rocket salvos */
+  private specialStep(p: Player, ui: UnitInput, dt: number): void {
+    const u = p.unit;
+    p.specialCd = Math.max(0, p.specialCd - dt);
+    const pressed = !!ui.special && !p.specialPrev;
+    p.specialPrev = !!ui.special;
+    if (pressed && p.specialCd <= 0 && u.alive && this.state === 'playing') this.useSpecial(p);
+    if (p.rocketsLeft > 0 && u.alive) {
+      p.rocketT -= dt;
+      if (p.rocketT <= 0) {
+        p.rocketT = 0.09;
+        p.rocketsLeft--;
+        u.muzzle(this.muzzle, (Math.random() - 0.5) * 0.9);
+        const m = this.muzzle;
+        const hs = Math.hypot(m.vx, m.vz) || 1;
+        m.vx = (m.vx / hs) * 32;
+        m.vz = (m.vz / hs) * 32;
+        m.vy = 5 + Math.random() * 3;
+        this.shots.fire(p.team, 'rocket', m.x, m.y + 0.4, m.z, m.vx, m.vy, m.vz, p.id);
+        this.room?.send('shot', encodeShot('rocket', { ...m, y: m.y + 0.4 }));
+        this.puff(m.x, m.y, m.z, 2, [0.9, 0.85, 0.8], 0.9);
+        if (p.local) this.audio.whoosh();
+      }
+    }
+  }
+
+  private useSpecial(p: Player): void {
+    const u = p.unit;
+    p.specialCd = SPECIALS[p.special].cooldown;
+    if (p.special === 'rockets') {
+      p.rocketsLeft = 6;
+      p.rocketT = 0;
+    } else if (p.special === 'laser') {
+      p.beamT = BEAM.time;
+      this.room?.send('beam', BEAM.time);
+      if (p.local) this.audio.whoosh();
+    } else if (p.special === 'emp') {
+      this.empAt(p, u.x, u.z);
+      this.room?.send('emp', { x: Math.round(u.x * 10) / 10, z: Math.round(u.z * 10) / 10 });
+    } else if (p.special === 'shield') {
+      p.shieldT = Math.max(p.shieldT, SHIELD_TIME);
+      if (p.local) this.audio.pickup();
+    } else if (p.special === 'tomato') {
+      u.muzzle(this.muzzle);
+      const m = this.muzzle;
+      const hs = Math.hypot(m.vx - u.vx, m.vz - u.vz) || 1;
+      m.vx = ((m.vx - u.vx) / hs) * 34 + u.vx;
+      m.vz = ((m.vz - u.vz) / hs) * 34 + u.vz;
+      m.vy = 9;
+      this.aimAssist(m, 'tomato');
+      this.shots.fire(p.team, 'tomato', m.x, m.y + 0.5, m.z, m.vx, m.vy, m.vz, p.id);
+      this.room?.send('shot', encodeShot('tomato', { ...m, y: m.y + 0.5 }));
+      if (p.local) this.audio.whoosh();
+    }
+  }
+
+  /** the laser: first thing in front of the beam gets burned (60 Hz) */
+  private beamStep(p: Player, dt: number): void {
+    const u = p.unit;
+    p.beamT -= dt;
+    if (!u.alive) p.beamT = 0;
+    if (!p.beam) {
+      p.beam = new THREE.Mesh(new THREE.CylinderGeometry(BEAM.width, BEAM.width, 1, 8, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5), new THREE.MeshBasicMaterial({ color: 0xff5ff0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
+      p.beam.renderOrder = 6;
+      this.r3.scene.add(p.beam);
+    }
+    p.beam.visible = p.beamT > 0;
+    if (p.beamT <= 0) return;
+    u.muzzle(this.muzzle);
+    const m = this.muzzle;
+    const dx = Math.sin(u.turret),
+      dz = Math.cos(u.turret);
+    // flat beam; it reaches up to drones (kid-friendly), stops at the first thing it touches
+    let best: Target | null = null,
+      bt = BEAM.length;
+    for (const t of this.targets) {
+      if (!t.alive || t.team === p.team || t.owner === p) continue;
+      if (t.y > m.y + 9 || t.y < m.y - 6) continue;
+      const hitT = rayHit(m.x, 0, m.z, dx, 0, dz, BEAM.length, t.x, 0, t.z, t.r + 0.5);
+      if (hitT >= 0 && hitT < bt) {
+        bt = hitT;
+        best = t;
+      }
+    }
+    const ex = m.x + dx * bt,
+      ez = m.z + dz * bt,
+      ey = best ? best.y : m.y;
+    const len = Math.hypot(ex - m.x, ey - m.y, ez - m.z);
+    p.beam.position.set(m.x, m.y, m.z);
+    p.beam.lookAt(ex, ey, ez);
+    p.beam.scale.set(1 + Math.sin(this.time * 50) * 0.25, 1 + Math.sin(this.time * 50) * 0.25, len);
+    if (this.steps % 3 === 0) this.sparks.emit(ex, ey, ez, 3, 3);
+    if (!best) return;
+    if (best.team === 'enemy' && best.owner) {
+      const e = best.owner as Enemy;
+      if (best.armor) return;
+      if (this.authority) {
+        if (e.damage(best, BEAM.dps * dt, this.ctx) === 'killed') this.onKill(e, p);
+      } else if (p.local) {
+        const a = p.beamAcc.get(best.id) ?? { e, t: best.id, dmg: 0 };
+        a.dmg += BEAM.dps * dt;
+        p.beamAcc.set(best.id, a);
+        p.beamSend -= dt;
+        if (p.beamSend <= 0) {
+          p.beamSend = 0.25;
+          for (const x of p.beamAcc.values()) this.room?.send('hit', { e: x.e.id, t: x.t, dmg: Math.round(x.dmg) });
+          p.beamAcc.clear();
+        }
+      }
+    } else if (best.owner) {
+      const victim = best.owner as Player;
+      if (victim.team !== p.team) this.hurtPlayer(victim, BEAM.pvpDps * dt, m.x, m.z, p.id, true);
+    }
+  }
+
+  private fxRings: { x: number; y: number; z: number; r: number; max: number; speed: number; mesh: THREE.Mesh }[] = [];
+
+  private ring(x: number, y: number, z: number, max: number, color: number, speed = 40): void {
+    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+    mesh.renderOrder = 5;
+    this.r3.scene.add(mesh);
+    this.fxRings.push({ x, y, z, r: 1, max, speed, mesh });
+  }
+
+  private updateRings(dt: number): void {
+    for (let i = this.fxRings.length - 1; i >= 0; i--) {
+      const g = this.fxRings[i];
+      g.r += g.speed * dt;
+      g.mesh.position.set(g.x, g.y + 0.5, g.z);
+      g.mesh.scale.set(g.r, 1, g.r);
+      (g.mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 * Math.max(0, 1 - g.r / g.max);
+      if (g.r >= g.max) {
+        g.mesh.removeFromParent();
+        g.mesh.geometry.dispose();
+        (g.mesh.material as THREE.Material).dispose();
+        this.fxRings.splice(i, 1);
+      }
+    }
+  }
+
+  /** EMP: freeze and zap every robot around (x, z); rivals lose their energy */
+  private empAt(p: Player, x: number, z: number): void {
+    const y = this.terrain.heightAt(x, z);
+    this.ring(x, y, z, EMP.radius, 0x7fd8ff, 45);
+    this.ring(x, y + 1.5, z, EMP.radius * 0.7, 0xffffff, 30);
+    this.sparks.emit(x, y + 2, z, 30, 6);
+    this.audio.impact(9);
+    if (this.authority)
+      for (const e of this.enemies) {
+        if (!e.alive || Math.hypot(e.x - x, e.z - z) > EMP.radius) continue;
+        e.stunT = EMP.stun;
+        const tg: Target[] = [];
+        e.targets(tg);
+        const t = tg.find((q) => !q.armor);
+        if (t && e.damage(t, EMP.damage, this.ctx) === 'killed') this.onKill(e, p);
+      }
+    for (const q of this.players) {
+      if (!q.local || q === p || q.team === p.team || !q.unit.alive) continue;
+      if (Math.hypot(q.unit.x - x, q.unit.z - z) > EMP.radius) continue;
+      q.unit.energy = 0;
+      this.hurtPlayer(q, EMP.pvpDamage, x, z, p.id);
+    }
+  }
+
+  private tomatoSplat(hit: Impact): void {
+    const red: RGB = [0.95, 0.2, 0.12];
+    for (let i = 0; i < 24; i++) {
+      const a = Math.random() * Math.PI * 2,
+        v = 2 + Math.random() * 7;
+      this.particles.emit(hit.x, hit.y + 0.3, hit.z, Math.cos(a) * v, 2 + Math.random() * 5, Math.sin(a) * v, i % 4 ? red : [1, 0.85, 0.4], 0.6 + Math.random() * 0.8, 0.6 + Math.random() * 0.5, 1);
+    }
+    this.audio.splat(true);
+    if (this.authority)
+      for (const e of this.enemies) if (e.alive && Math.hypot(e.x - hit.x, e.z - hit.z) < SHOTS.tomato.splash + e.r) e.stunT = Math.max(e.stunT ?? 0, TOMATO_STUN);
+    const me = this.local;
+    if (me && me.unit.alive && hit.team !== me.team && Math.hypot(me.unit.x - hit.x, me.unit.z - hit.z) < SHOTS.tomato.splash + 1) this.hud.splat();
   }
 
   /** a mech landing hard stomps the ground: damages nearby enemies */
@@ -1502,7 +1720,7 @@ export class TitansGame {
         name: p.name,
         color: this.colorOf(p),
         x: p.view.root.position.x,
-        y: p.view.root.position.y + (p.unit.kind === 'mech' ? 6.4 : 4),
+        y: p.view.root.position.y + p.unit.spec.tagHeight,
         z: p.view.root.position.z,
         visible: p.unit.alive,
         showName: !p.local,
@@ -1542,8 +1760,8 @@ export class TitansGame {
       p.view.update(u, alpha, dt);
       p.bubble.visible = u.alive && p.shieldT > 0 && (p.shieldT > 2 || Math.sin(this.time * 20) > 0);
       if (p.bubble.visible) {
-        const r = u.kind === 'mech' ? 3.6 : 3.4;
-        p.bubble.position.set(lerp(u.px, u.x, alpha), lerp(u.py, u.y, alpha) + (u.kind === 'mech' ? 2.8 : 1.4), lerp(u.pz, u.z, alpha));
+        const [r, by] = u.spec.bubble;
+        p.bubble.position.set(lerp(u.px, u.x, alpha), lerp(u.py, u.y, alpha) + by, lerp(u.pz, u.z, alpha));
         p.bubble.scale.setScalar(r * (1 + 0.03 * Math.sin(this.time * 8)));
       }
     }
@@ -1554,7 +1772,7 @@ export class TitansGame {
     this.cam.ground = (px, pz) => this.terrain.heightAt(px, pz);
     const bossNear = this.boss && Math.hypot(this.boss.x - x, this.boss.z - z) < 60 ? 0.25 : 0;
     this.cam.zoomTarget = this.state === 'menu' ? 0.9 : (isTouchDevice() ? 1.0 : 1.3) + bossNear;
-    this.cam.chaseScale = t.kind === 'mech' ? 1.9 : 1.35;
+    this.cam.chaseScale = t.spec.chase;
     const ch = t.kind === 'mech' ? (chase ? lerpAngle(t.pTurret, t.turret, alpha) : h) : h;
     this.cam.update(Math.min(dt, 0.05), x, y, z, t.vx, t.vz, ch, false);
     this.terrain.update(x + t.vx, z + t.vz, this.r3.quality.genBudgetMs);
@@ -1598,8 +1816,12 @@ export class TitansGame {
     if (this.state === 'playing') {
       const mu = me.unit;
       this.hud.bar('hp', mu.hp / mu.spec.maxHp);
-      this.hud.bar('reload', 1 - mu.reload / (RELOAD[mu.kind] * mu.reloadScale));
+      this.hud.bar('reload', 1 - mu.reload / (mu.spec.reload * mu.reloadScale));
       this.hud.bar('energy', mu.energy);
+      const sp = SPECIALS[me.special];
+      const charge = 1 - me.specialCd / sp.cooldown;
+      this.hud.special(sp.icon, charge);
+      this.sticks.setSpecial(sp.icon, charge);
       const mt = Math.max(0, Math.ceil(this.matchT));
       this.hud.set('wave', this.room && this.mode !== 'coop' ? `⏱ ${Math.floor(mt / 60)}:${String(mt % 60).padStart(2, '0')}` : this.wave ? `WAVE ${this.wave}` : 'GET READY');
       if (this.room) this.updateBoard();
@@ -1611,7 +1833,7 @@ export class TitansGame {
       this.hud.set('powers', pw.join('  '));
       const b = this.boss;
       if (b) this.hud.bar('bossHp', b.hpFrac);
-      const rpm = t.kind === 'mech' ? 700 + t.drive * 1300 + (t.dashing ? 1500 : 0) : 900 + Math.abs(t.drive) * 3200 + (this.input.unit.move > 0.1 ? 600 : 0) + (t.dashing ? 1200 : 0);
+      const rpm = t.kind === 'mech' ? 700 + t.drive * 1300 + (t.dashing ? 1500 : 0) : t.kind === 'scout' ? 1400 + Math.abs(t.drive) * 5200 + (t.dashing ? 1500 : 0) : 900 + Math.abs(t.drive) * 3200 + (this.input.unit.move > 0.1 ? 600 : 0) + (t.dashing ? 1200 : 0);
       this.audio.update(me.unit.alive ? rpm : 0, me.unit.speed, this.input.unit.move, 0, me.unit.airborne, 0, t.kind === 'tank' ? 0.3 : 0.1);
     }
 

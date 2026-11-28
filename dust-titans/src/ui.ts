@@ -3,10 +3,12 @@ import { settings, updateSettings, isTouchDevice } from '@engine/core/settings';
 import { load, save } from '@engine/core/storage';
 import { MECH_SPEC } from './units/mech';
 import { TANK_SPEC } from './units/tank';
-import { LIVERIES, UPGRADES, liveryById, type UnitKind, type UnitSpec, type UpgradeId, type Upgrades } from './units/unit';
+import { SCOUT_SPEC } from './units/scout';
+import { LIVERIES, UPGRADES, liveryById, unitKind, type UnitKind, type UnitSpec, type UpgradeId, type Upgrades } from './units/unit';
 import * as THREE from 'three';
 import { EMOTES, HOST_ID, MODES, type Mode, type Room, type Side } from './net/room';
 import { ARENAS, arenaById } from './arena';
+import { SPECIALS, SPECIAL_IDS, specialId, type SpecialId } from './specials';
 
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -24,9 +26,10 @@ export interface ResultRow {
 export interface Loadout {
   unit: UnitKind;
   livery: string;
+  special: SpecialId;
 }
 
-export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC };
+export const SPECS: Record<UnitKind, UnitSpec> = { tank: TANK_SPEC, mech: MECH_SPEC, scout: SCOUT_SPEC };
 
 export function loadUpgrades(): Upgrades {
   const u = load<Partial<Upgrades>>('titans.upgrades', {});
@@ -36,7 +39,7 @@ export function loadUpgrades(): Upgrades {
 
 export function loadLoadout(): Loadout {
   const l = load<Partial<Loadout>>('titans.loadout', {});
-  return { unit: l.unit === 'mech' ? 'mech' : 'tank', livery: liveryById(l.livery ?? '').id };
+  return { unit: unitKind(l.unit), livery: liveryById(l.livery ?? '').id, special: specialId(l.special) };
 }
 
 /** Battle HUD: health, cannon reload, wave + score, buttons, banners, damage flash. */
@@ -66,6 +69,8 @@ export class BattleHud {
         <button class="icon-btn" data-k="cam" aria-label="Camera" title="Camera (C)">🎥</button>
         <button class="icon-btn" data-k="music" aria-label="Music" title="Music (M)">🎵</button>
       </div>
+      <div class="tt-special" data-k="special"><span data-k="specialIcon">🚀</span><small>Q</small></div>
+      <div class="tt-splat" data-k="splat"></div>
       <div class="tt-board" data-k="board"></div>
       <div class="tt-banner" data-k="banner"></div>
       <div class="tt-emotes" data-k="emotes">${EMOTES.map((e, i) => `<button data-emote="${i}">${e}</button>`).join('')}</div>
@@ -79,7 +84,29 @@ export class BattleHud {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-emote]');
       if (b) this.onEmote(+b.dataset.emote!);
     });
+    this.el.special.addEventListener('click', () => this.onSpecial());
+    if (isTouchDevice()) this.el.special.style.display = 'none'; // the touch SPECIAL button instead
     this.online(false);
+  }
+
+  onSpecial = () => {};
+
+  /** special weapon icon + charge 0..1 */
+  special(icon: string, charge: number): void {
+    this.set('specialIcon', icon);
+    const c = String(Math.round(charge * 50) / 50);
+    if (this.cache.charge === c) return;
+    this.cache.charge = c;
+    this.el.special.style.setProperty('--charge', c);
+    this.el.special.classList.toggle('ready', charge >= 1);
+  }
+
+  /** tomato in the face! */
+  splat(): void {
+    const s = this.el.splat;
+    s.classList.remove('on');
+    void s.offsetWidth;
+    s.classList.add('on');
   }
 
   onEmote = (_i: number) => {};
@@ -260,11 +287,14 @@ export class TitansMenu {
       const l = this.loadout;
       const bar = (label: string, v: number) => `<div class="tt-stat"><span>${label}</span><i><em style="width:${Math.round(v * 100)}%"></em></i></div>`;
       const card = (sp: UnitSpec) => `<button class="tt-unit ${l.unit === sp.kind ? 'sel' : ''}" data-unit="${sp.kind}">
-          <b>${sp.kind === 'tank' ? '🛡️' : '🤖'} ${sp.name}</b><small>${sp.blurb}</small>
+          <b>${sp.icon} ${sp.name}</b><small>${sp.blurb}</small>
           ${bar('Armour', sp.bars.armour)}${bar('Speed', sp.bars.speed)}${bar('Firepower', sp.bars.firepower)}${bar('Agility', sp.bars.agility)}
           <div class="tt-ability">${sp.ability}</div></button>`;
       html = `<h2>Garage</h2>
-        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}</div>
+        <div class="tt-units">${card(TANK_SPEC)}${card(MECH_SPEC)}${card(SCOUT_SPEC)}</div>
+        <div class="muted small">Special weapon (Q)</div>
+        <div class="tt-specials">${SPECIAL_IDS.map((id) => `<button class="tt-spec ${l.special === id ? 'sel' : ''}" data-special="${id}" title="${SPECIALS[id].blurb}">${SPECIALS[id].icon} ${SPECIALS[id].name}</button>`).join('')}</div>
+        <div class="muted small tt-spec-blurb">${SPECIALS[l.special].blurb}</div>
         <div class="tt-upgrades"><div class="tt-coins">🪙 ${this.coins} coins</div>
           ${(Object.keys(UPGRADES) as UpgradeId[])
             .map((id) => {
@@ -306,7 +336,7 @@ export class TitansMenu {
         .map((p) => {
           const lv = liveryById(p.livery);
           const side = r.mode === 'alliance' ? `<i class="tt-side" style="background:${SIDE_COLORS[p.side]}"></i>` : '';
-          return `<div class="tt-prow ${p.id === r.myId ? 'me' : ''}">${side}<span class="tt-chip" style="background:linear-gradient(135deg,${hex(lv.body)} 55%,${hex(lv.stripe)} 55%)"></span><b>${esc(p.name)}</b><span>${p.unit === 'mech' ? '🤖 Robot suit' : '🛡️ Tank'}</span>${p.id === HOST_ID ? '<em>host</em>' : ''}</div>`;
+          return `<div class="tt-prow ${p.id === r.myId ? 'me' : ''}">${side}<span class="tt-chip" style="background:linear-gradient(135deg,${hex(lv.body)} 55%,${hex(lv.stripe)} 55%)"></span><b>${esc(p.name)}</b><span>${SPECS[unitKind(p.unit)].icon} ${SPECS[unitKind(p.unit)].name}</span>${p.id === HOST_ID ? '<em>host</em>' : ''}</div>`;
         })
         .join('');
       const modes = (Object.keys(MODES) as Mode[])
@@ -391,8 +421,9 @@ export class TitansMenu {
     if (md) return this.h.setMode(md.dataset.mode as Mode);
     const sd = (e.target as HTMLElement).closest<HTMLElement>('[data-side]');
     if (sd) return this.h.setSide(sd.dataset.side as Side);
-    const u = (e.target as HTMLElement).closest<HTMLElement>('[data-unit],[data-livery]');
+    const u = (e.target as HTMLElement).closest<HTMLElement>('[data-unit],[data-livery],[data-special]');
     if (u) {
+      if (u.dataset.special) this.loadout.special = specialId(u.dataset.special);
       if (u.dataset.unit) this.loadout.unit = u.dataset.unit as UnitKind;
       if (u.dataset.livery) this.loadout.livery = u.dataset.livery;
       save('titans.loadout', this.loadout);
